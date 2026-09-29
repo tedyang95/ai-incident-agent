@@ -27,7 +27,7 @@ spring:
       chat:
         options:
           model: gpt-4o-mini
-          temperature: 0.3
+          temperature: 0.1
           max-tokens: 1000
 
 # 外部服务地址（Docker 环境下由环境变量覆盖）

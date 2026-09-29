@@ -111,8 +111,8 @@ public class AlertAnalysisService {
         log.debug("Metrics collected: {} chars", metrics.length());
 
         // 1b. Loki 错误日志
-        String errors = lokiTool.getRecentErrors(incident.getService(), 15);
-        String exceptions = lokiTool.getRecentExceptions(incident.getService(), 15);
+        String errors = lokiTool.getRecentErrors(incident.getService(), 5);
+        String exceptions = lokiTool.getRecentExceptions(incident.getService(), 5);
         String logs = errors + "\n" + exceptions;
         incident.setRelatedLogs(truncate(logs, 2000));
         log.debug("Logs collected: {} chars", logs.length());
@@ -226,7 +226,7 @@ public class AlertAnalysisService {
                 === METRICS (from Prometheus) ===
                 %s
 
-                === LOGS (from Loki, last 15 minutes) ===
+                === LOGS (from Loki, last 5 minutes) ===
                 %s
 
                 === MATCHED RUNBOOKS (from knowledge base) ===
