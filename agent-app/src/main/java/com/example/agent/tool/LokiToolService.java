@@ -101,6 +101,77 @@ public class LokiToolService {
     }
 
     /**
+     * 按锚定时间窗搜索日志（correlation window）
+     * 与告警触发时刻对齐：只查告警前 N 分钟到告警时刻的日志（根因发生在告警前），
+     * 避免"当前时间往前 N 分钟"的滑动窗口把相邻告警/上一故障的残留日志带进来。
+     *
+     * @param service  服务名，用于过滤
+     * @param keyword  搜索关键词
+     * @param from     窗口起点（告警触发时刻 - N 分钟）
+     * @param to       窗口终点（告警触发时刻）
+     * @param limit    返回最大条数
+     * @return 日志文本摘要
+     */
+    public String searchLogsBetween(String service, String keyword, Instant from, Instant to, int limit) {
+        try {
+            String logql = "{service=\"" + service + "\"} |= `" + keyword + "`";
+            String start = String.valueOf(from.getEpochSecond()) + "000000000";
+            String end = String.valueOf(to.getEpochSecond()) + "000000000";
+
+            String url = lokiUrl + "/loki/api/v1/query_range"
+                    + "?query={query}"
+                    + "&start={start}"
+                    + "&end={end}"
+                    + "&limit={limit}";
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = restTemplate.getForObject(url, Map.class, logql, start, end, limit);
+
+            if (response == null || !"success".equals(response.get("status"))) {
+                return "Loki query failed: " + response;
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) response.get("data");
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> streams = (List<Map<String, Object>>) data.get("result");
+
+            if (streams == null || streams.isEmpty()) {
+                return "No logs found for service='" + service + "', keyword='" + keyword +
+                        "' in correlation window.";
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("=== Logs for service=").append(service)
+                    .append(", keyword=").append(keyword)
+                    .append(" (correlation window: ").append(from).append(" ~ ").append(to).append(") ===\n\n");
+
+            int count = 0;
+            for (Map<String, Object> stream : streams) {
+                @SuppressWarnings("unchecked")
+                List<List<String>> values = (List<List<String>>) stream.get("values");
+                if (values != null) {
+                    for (List<String> entry : values) {
+                        if (count >= limit) break;
+                        String timestamp = entry.get(0);
+                        String line = entry.get(1);
+                        sb.append(formatTimestamp(timestamp)).append(" ").append(line).append("\n");
+                        count++;
+                    }
+                }
+            }
+
+            sb.append("\n(Total: ").append(count).append(" log lines)\n");
+            log.debug("Loki window search for '{}' in '{}' found {} lines", keyword, service, count);
+            return sb.toString();
+
+        } catch (Exception e) {
+            log.error("Loki window search failed: {}", e.getMessage());
+            return "Loki search error: " + e.getMessage();
+        }
+    }
+
+    /**
      * 获取服务最近的错误日志（ERROR 级别）
      * 用于告警分析时自动收集上下文
      */

@@ -1,0 +1,4 @@
+time,fault,incident_id,alertname,status,confidence,prompt_tokens,completion_tokens,duration_ms,root_cause
+23:24:09,error,42|HighErrorRate|COMPLETED|0.8|6511|316|4557|ThehigherrorrateislikelycausedbysimulateddatabaseconnectiontimeoutsresultinginRuntimeExceptionsduringordercreation.
+23:27:28,latency,44|HighLatency|COMPLETED|0.8|6535|218|3687|Thehighp99latencyislikelycausedbysimulateddatabaseconnectiontimeoutsleadingtoincreasedrequestprocessingtime.
+23:33:11,memory,46|HighMemoryUsage|COMPLETED|0.7|3994|264|3849|ThehighJVMheapmemoryusageislikelyduetoamemoryleakorexcessivememoryconsumptionbytheapplication,asindicatedbytheJVMheapusagemetricbeingabove85%formorethan2minutes.

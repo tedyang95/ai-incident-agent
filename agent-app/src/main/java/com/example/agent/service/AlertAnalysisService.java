@@ -13,7 +13,10 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -112,9 +115,12 @@ public class AlertAnalysisService {
         incident.setRelatedMetrics(truncate(metrics, 2000));
         log.debug("Metrics collected: {} chars", metrics.length());
 
-        // 1b. Loki 错误日志
-        String errors = lokiTool.getRecentErrors(incident.getService(), 5);
-        String exceptions = lokiTool.getRecentExceptions(incident.getService(), 5);
+        // 1b. Loki 错误日志（锚定告警触发时刻的 correlation window：告警前 2 分钟 ~ 告警时刻）
+        //     不用"当前时间往前 N 分钟"的滑动窗口，避免相邻告警/上一故障的残留日志污染本案分析
+        Instant alertInstant = incident.getReceivedAt().toInstant(ZoneOffset.UTC);
+        Instant logFrom = alertInstant.minus(2, ChronoUnit.MINUTES);
+        String errors = lokiTool.searchLogsBetween(incident.getService(), "ERROR", logFrom, alertInstant, 20);
+        String exceptions = lokiTool.searchLogsBetween(incident.getService(), "Exception", logFrom, alertInstant, 15);
         String logs = errors + "\n" + exceptions;
         incident.setRelatedLogs(truncate(logs, 2000));
         log.debug("Logs collected: {} chars", logs.length());
@@ -239,7 +245,7 @@ public class AlertAnalysisService {
                 === METRICS (from Prometheus) ===
                 %s
 
-                === LOGS (from Loki, last 5 minutes) ===
+                === LOGS (from Loki, correlation window around alert time) ===
                 %s
 
                 === MATCHED RUNBOOKS (from knowledge base) ===
