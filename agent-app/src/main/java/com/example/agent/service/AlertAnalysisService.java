@@ -18,7 +18,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 告警分析服务 - AI Agent 的核心编排（orchestration）
@@ -115,13 +118,26 @@ public class AlertAnalysisService {
         incident.setRelatedMetrics(truncate(metrics, 2000));
         log.debug("Metrics collected: {} chars", metrics.length());
 
-        // 1b. Loki 错误日志（锚定告警触发时刻的 correlation window：告警前 2 分钟 ~ 告警时刻）
-        //     不用"当前时间往前 N 分钟"的滑动窗口，避免相邻告警/上一故障的残留日志污染本案分析
+        // 1b. Loki 日志检索（告警语义关键词 + correlation window）
+        //     关键词由告警类别驱动：latency 告警也搜 slow/sleep/timeout 信号，
+        //     而不只查 ERROR/Exception（latency 故障通常是 WARN/DEBUG 日志，无异常堆栈）
         Instant alertInstant = incident.getReceivedAt().toInstant(ZoneOffset.UTC);
         Instant logFrom = alertInstant.minus(2, ChronoUnit.MINUTES);
-        String errors = lokiTool.searchLogsBetween(incident.getService(), "ERROR", logFrom, alertInstant, 20);
-        String exceptions = lokiTool.searchLogsBetween(incident.getService(), "Exception", logFrom, alertInstant, 15);
-        String logs = errors + "\n" + exceptions;
+        Set<String> keywords = new LinkedHashSet<>();
+        keywords.add("ERROR");
+        keywords.add("Exception");
+        String cat = incident.getCategory() == null ? "" : incident.getCategory();
+        switch (cat) {
+            case "latency" -> keywords.addAll(List.of("sleeping", "Latency fault", "timeout"));
+            case "resource" -> keywords.addAll(List.of("OutOfMemory", "memory"));
+            case "error-rate" -> keywords.addAll(List.of("RuntimeException"));
+            default -> { }
+        }
+        StringBuilder logsBuilder = new StringBuilder();
+        for (String kw : keywords) {
+            logsBuilder.append(lokiTool.searchLogsBetween(incident.getService(), kw, logFrom, alertInstant, 10)).append("\n");
+        }
+        String logs = logsBuilder.toString();
         incident.setRelatedLogs(truncate(logs, 2000));
         log.debug("Logs collected: {} chars", logs.length());
 
