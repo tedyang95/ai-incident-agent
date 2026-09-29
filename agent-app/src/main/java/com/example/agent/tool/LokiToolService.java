@@ -42,7 +42,7 @@ public class LokiToolService {
     public String searchLogs(String service, String keyword, int minutes, int limit) {
         try {
             // Loki LogQL 查询: {service="demo-app"} |= "keyword"
-            String logql = "{service='" + service + "'} |= `" + keyword + "`";
+            String logql = "{service=\"" + service + "\"} |= `" + keyword + "`";
             String end = String.valueOf(Instant.now().getEpochSecond()) + "000000000";
             String start = String.valueOf(Instant.now().minus(minutes, ChronoUnit.MINUTES).getEpochSecond()) + "000000000";
 
