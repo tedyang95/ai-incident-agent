@@ -65,6 +65,9 @@ public class Incident {
     @Column(columnDefinition = "TEXT")
     private String matchedRunbooks; // 匹配到的 runbook
 
+    @Column(columnDefinition = "TEXT")
+    private String contextSnapshot; // 喂给 LLM 的完整上下文快照（JSON，审计/grounding 验证用）
+
     // 状态
     @Enumerated(EnumType.STRING)
     private AnalysisStatus status; // PENDING / ANALYZING / COMPLETED / FAILED
@@ -136,6 +139,9 @@ public class Incident {
 
     public String getMatchedRunbooks() { return matchedRunbooks; }
     public void setMatchedRunbooks(String matchedRunbooks) { this.matchedRunbooks = matchedRunbooks; }
+
+    public String getContextSnapshot() { return contextSnapshot; }
+    public void setContextSnapshot(String contextSnapshot) { this.contextSnapshot = contextSnapshot; }
 
     public AnalysisStatus getStatus() { return status; }
     public void setStatus(AnalysisStatus status) { this.status = status; }

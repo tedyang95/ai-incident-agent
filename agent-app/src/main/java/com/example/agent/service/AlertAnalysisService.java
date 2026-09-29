@@ -14,6 +14,8 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 告警分析服务 - AI Agent 的核心编排（orchestration）
@@ -126,6 +128,17 @@ public class AlertAnalysisService {
         );
         incident.setMatchedRunbooks(truncate(runbooks, 900));
         log.debug("Runbooks retrieved: {} chars", runbooks.length());
+
+        // 1d. 存完整上下文快照（审计/可复现性：LLM 实际看到的原文，未截断）
+        try {
+            Map<String, String> snapshot = new LinkedHashMap<>();
+            snapshot.put("metrics", metrics);
+            snapshot.put("logs", logs);
+            snapshot.put("runbooks", runbooks);
+            incident.setContextSnapshot(objectMapper.writeValueAsString(snapshot));
+        } catch (Exception e) {
+            log.warn("Failed to save context snapshot: {}", e.getMessage());
+        }
 
         // ============================================================
         // Step 2: 构建 Prompt（Prompt Engineering）
