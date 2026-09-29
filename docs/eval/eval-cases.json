@@ -1,0 +1,37 @@
+{
+  "description": "AI Incident Triage Agent 评估集（Evaluation Set / Golden Dataset）：故障注入制造已知根因（ground truth），用于调教（tuning）时给 LLM 输出打分。用于测量（measure），不用于训练（train）。",
+  "model_under_test": "gpt-4o-mini",
+  "evaluation_metric": "expected_root_cause_keywords 命中率 + confidence 校准 + parse 成功率 + 成本/延迟",
+  "cases": [
+    {
+      "id": "case-001",
+      "fault": "error",
+      "alert_expected": "HighErrorRate",
+      "inject": { "method": "POST", "url": "/api/admin/fail/error" },
+      "traffic": { "type": "POST /api/orders", "note": "订单接口在 error 模式下抛 RuntimeException 返回 500" },
+      "expected_root_cause_keywords": ["api/orders", "runtimeexception", "500", "error rate"],
+      "expected_category": "error-rate",
+      "expected_confidence_min": 0.5
+    },
+    {
+      "id": "case-002",
+      "fault": "latency",
+      "alert_expected": "HighLatency",
+      "inject": { "method": "POST", "url": "/api/admin/fail/latency" },
+      "traffic": { "type": "GET /api/products", "note": "所有请求 sleep 2-5s，p99 必然超过 1s 阈值" },
+      "expected_root_cause_keywords": ["latency", "delay", "slow", "p99", "sleep"],
+      "expected_category": "latency",
+      "expected_confidence_min": 0.5
+    },
+    {
+      "id": "case-003",
+      "fault": "memory",
+      "alert_expected": "HighMemoryUsage",
+      "inject": { "method": "POST", "url": "/api/admin/fail/memory" },
+      "traffic": { "type": "none", "note": "FaultState 内部线程每秒分配 10MB 且不释放，触发 G1 Old Gen > 85%" },
+      "expected_root_cause_keywords": ["memory", "heap", "leak", "old gen", "allocation"],
+      "expected_category": "resource",
+      "expected_confidence_min": 0.5
+    }
+  ]
+}

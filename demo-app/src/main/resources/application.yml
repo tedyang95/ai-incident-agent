@@ -1,0 +1,42 @@
+# Demo App 配置
+server:
+  port: 8080
+
+spring:
+  application:
+    name: demo-ecommerce
+  datasource:
+    url: jdbc:h2:mem:demodb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  h2:
+    console:
+      enabled: true
+
+# Actuator - 暴露 Prometheus metrics
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+# 日志格式 - JSON 结构化日志，方便 Loki 解析
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  level:
+    com.example.demo: INFO

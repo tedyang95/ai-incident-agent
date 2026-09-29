@@ -1,0 +1,37 @@
+# Prometheus 配置 - 采集 demo-app 的指标
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# 告警规则文件
+rule_files:
+  - "alert_rules.yml"
+
+# Alertmanager 地址
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# 采集目标
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: "demo-app"
+    metrics_path: "/actuator/prometheus"
+    static_configs:
+      - targets: ["demo-app:8080"]
+        labels:
+          application: "demo-ecommerce"
+          environment: "docker"
+
+  - job_name: "agent-app"
+    metrics_path: "/actuator/prometheus"
+    static_configs:
+      - targets: ["agent-app:8081"]
+        labels:
+          application: "ai-incident-agent"
+          environment: "docker"

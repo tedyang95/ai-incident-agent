@@ -1,0 +1,13 @@
+# Grafana 仪表盘自动配置（as-code）
+# 告诉 Grafana 从哪个目录加载 dashboard JSON 文件
+apiVersion: 1
+
+providers:
+  - name: "incident-overview"
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards

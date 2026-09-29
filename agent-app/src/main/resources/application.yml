@@ -1,0 +1,56 @@
+# AI Incident Triage Agent 配置
+server:
+  port: 8081
+
+spring:
+  application:
+    name: ai-incident-agent
+
+  # 数据库
+  datasource:
+    url: jdbc:postgresql://localhost:5432/incident_agent
+    username: agent
+    password: agent123
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # Spring AI - OpenAI 配置
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:your-api-key-here}
+      chat:
+        options:
+          model: gpt-4o-mini
+          temperature: 0.3
+          max-tokens: 1000
+
+# 外部服务地址（Docker 环境下由环境变量覆盖）
+app:
+  prometheus:
+    url: ${PROMETHEUS_URL:http://localhost:9090}
+  loki:
+    url: ${LOKI_URL:http://localhost:3100}
+  alertmanager:
+    url: ${ALERTMANAGER_URL:http://localhost:9093}
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    prometheus:
+      enabled: true
+
+# 日志
+logging:
+  level:
+    com.example.agent: DEBUG
+    org.springframework.ai: INFO

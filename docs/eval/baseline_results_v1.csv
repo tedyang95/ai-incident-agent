@@ -1,0 +1,4 @@
+time,fault,incident_id,alertname,status,confidence,prompt_tokens,completion_tokens,duration_ms,root_cause
+21:33:14,error,16|HighErrorRate|COMPLETED|0.7|3749|302|5079|ThehigherrorrateislikelycausedbyaRuntimeExceptionoccurringinthe/api/ordersendpoint,leadingtoasignificantnumberof500errors.
+21:36:23,latency,18|HighLatency|COMPLETED|0.6|3784|248|3485|Highp99latencyislikelycausedbyslowqueriesorhighlatencyinthe/api/ordersendpoint.
+21:41:54,memory,20|HighMemoryUsage|COMPLETED|0.7|3729|309|4079|ThehighJVMheapmemoryusageislikelyduetoamemoryleakorexcessivememoryconsumptionbytheapplication.

@@ -1,0 +1,170 @@
+# AI Incident Triage Agent - Docker Compose
+# 一键启动整个技术栈：demo应用 + 监控 + AI Agent
+# Usage: docker compose up -d
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  postgres_data:
+
+services:
+  # ============================================================
+  # 1. Demo App - 被监控的示例应用（产生日志和指标）
+  # ============================================================
+  demo-app:
+    build:
+      context: .
+      dockerfile: demo-app/Dockerfile
+    container_name: demo-app
+    ports:
+      - "8080:8080"
+    networks:
+      - monitoring
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    restart: unless-stopped
+
+  # ============================================================
+  # 2. Prometheus - 指标采集（metrics collection）
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ============================================================
+  # 3. Alertmanager - 告警管理（alert routing & notification）
+  # ============================================================
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ============================================================
+  # 4. Loki - 日志聚合（log aggregation）
+  # ============================================================
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ============================================================
+  # 5. Promtail - 日志采集器（log collector），把日志发给 Loki
+  # ============================================================
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./loki/promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - monitoring
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # ============================================================
+  # 6. Grafana - 可视化面板（visualization dashboard）
+  # ============================================================
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+  # ============================================================
+  # 7. PostgreSQL - AI Agent 的数据库（存 incident 记录和 RAG 知识）
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=incident_agent
+      - POSTGRES_USER=agent
+      - POSTGRES_PASSWORD=agent123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ============================================================
+  # 8. AI Agent - 核心服务（接收告警 → 分析 → 根因定位）
+  # ============================================================
+  agent-app:
+    build:
+      context: .
+      dockerfile: agent-app/Dockerfile
+    container_name: agent-app
+    ports:
+      - "8081:8081"
+    networks:
+      - monitoring
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/incident_agent
+      - SPRING_DATASOURCE_USERNAME=agent
+      - SPRING_DATASOURCE_PASSWORD=agent123
+      - PROMETHEUS_URL=http://prometheus:9090
+      - LOKI_URL=http://loki:3100
+      - ALERTMANAGER_URL=http://alertmanager:9093
+      # LLM API 配置（启动前填入你的 API key）
+      - SPRING_AI_OPENAI_API_KEY=${OPENAI_API_KEY:-your-api-key-here}
+      - SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL=gpt-4o-mini
+    depends_on:
+      - postgres
+      - prometheus
+      - loki
+    restart: unless-stopped
