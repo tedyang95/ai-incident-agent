@@ -1,15 +1,17 @@
 #!/bin/bash
 # ============================================================
-# AI Incident Triage Agent - Baseline 评估脚本（支持单故障 + 复合故障）
-# 依次注入故障（ground truth），等待 AI 分析完成，从 Postgres 拉取结果，输出 CSV。
+# AI Incident Triage Agent - baseline evaluation script (single + composite faults)
+# Injects each fault (ground truth), waits for the AI analysis to complete,
+# pulls results from Postgres, and writes a CSV.
 #
-# 单故障：   error / latency / memory（一个告警 → 一个 Incident）
-# 复合故障： error+latency / latency+memory / error+memory
-#           （同一时刻注入两个故障 → 两个告警独立投递 → 两个 Incident，
-#            评估"判别力 discrimination"：各自命中各自根因，不串扰）
+# Single faults:   error / latency / memory (one alert -> one Incident)
+# Composite faults: error+latency / latency+memory / error+memory
+#           (two faults injected at the same time -> two alerts delivered
+#            independently -> two Incidents; evaluates discrimination:
+#            each must hit its own root cause without cross-talk)
 #
-# 用法：bash docs/eval/run_baseline.sh [output.csv] [all|single|composite]
-# 输出：默认 docs/eval/baseline_results.csv
+# Usage: bash docs/eval/run_baseline.sh [output.csv] [all|single|composite]
+# Output: default docs/eval/baseline_results.csv
 # ============================================================
 
 cd /Users/yangtong/ai-incident-agent
@@ -17,7 +19,7 @@ OUT=${1:-docs/eval/baseline_results.csv}
 MODE=${2:-all}
 echo "time,fault,incident_id,alertname,status,confidence,prompt_tokens,completion_tokens,duration_ms,root_cause" > "$OUT"
 
-# 故障 → 期望告警名
+# fault -> expected alert name
 alertname_for() {
   case $1 in
     error)   echo "HighErrorRate" ;;
@@ -26,9 +28,9 @@ alertname_for() {
   esac
 }
 
-# --- 告警隔离（alert settle）：等上一个 case 的告警全部 resolve ---
+# --- alert settle: wait until the previous case's alerts are fully resolved ---
 settle() {
-  echo ">>> [settle] 等待告警清空..."
+  echo ">>> [settle] waiting for alerts to clear..."
   local settled=0
   while [ $settled -lt 150 ]; do
     local firing
@@ -41,21 +43,21 @@ except Exception:
     print('-1')
 " 2>/dev/null)
     if [ "$firing" = "0" ]; then
-      echo ">>> [settle] 告警已清空（${settled}s）"
+      echo ">>> [settle] alerts cleared (${settled}s)"
       break
     fi
     sleep 10; settled=$((settled+10))
   done
-  sleep 30  # rate 窗口滑过：PromQL [1m] 内残留指标归零
+  sleep 30  # let the rate window slide: residual metrics within PromQL [1m] go to zero
 }
 
-# --- 跑一个 case：fault 支持 "error" / "error+latency" 复合语法 ---
+# --- run one case: fault supports composite syntax like "error+latency" ---
 run_case() {
   local fault=$1
   local wait_seconds=$2
   IFS='+' read -ra faults <<< "$fault"
 
-  # 展开期望告警列表
+  # expand the expected alert list
   local alerts=()
   for f in "${faults[@]}"; do
     alerts+=("$(alertname_for "$f")")
@@ -63,16 +65,16 @@ run_case() {
 
   settle
 
-  # 记录本轮起点 incident id（只认新产生的）
+  # record the current max incident id (only count newly created incidents)
   local start_id
   start_id=$(docker exec postgres psql -U agent -d incident_agent -t -c "SELECT COALESCE(MAX(id),0) FROM incidents;" | tr -d ' \n')
 
-  echo ">>> [$fault] 注入故障: ${faults[*]}"
+  echo ">>> [$fault] injecting fault: ${faults[*]}"
   for f in "${faults[@]}"; do
     curl -s -X POST "http://localhost:8080/api/admin/fail/$f" > /dev/null
   done
 
-  # 压流量（error/latency 需要制造指标；memory 由内部线程自动分配）
+  # generate traffic (error/latency need metrics; memory is allocated by the internal thread)
   for f in "${faults[@]}"; do
     case $f in
       error)   (for i in $(seq 1 200); do curl -s -o /dev/null -X POST -H "Content-Type: application/json" -d '{"productId":1,"quantity":1}' http://localhost:8080/api/orders; sleep 0.3; done) & ;;
@@ -80,8 +82,9 @@ run_case() {
     esac
   done
 
-  # 轮询：等【每个】期望告警名的 COMPLETED incident 都出现（复合 = 两个都要）
-  echo ">>> [$fault] 等待 AI 分析完成（期望: ${alerts[*]}，上限 ${wait_seconds}s）..."
+  # poll: wait until a COMPLETED incident exists for EVERY expected alertname
+  # (composite = both must appear)
+  echo ">>> [$fault] waiting for AI analysis (expected: ${alerts[*]}, cap ${wait_seconds}s)..."
   local waited=0
   while [ $waited -lt $wait_seconds ]; do
     local missing=""
@@ -92,16 +95,16 @@ run_case() {
       [ "$cnt" = "0" ] && missing="$missing $a"
     done
     if [ -z "$missing" ]; then
-      echo ">>> [$fault] 全部告警分析完成（${waited}s）"
+      echo ">>> [$fault] all alerts analyzed (${waited}s)"
       break
     fi
     sleep 10; waited=$((waited+10))
   done
 
-  # 停故障（无论成败都清理，避免污染下一个 case）
+  # stop the fault (always clean up, even on failure, to avoid polluting the next case)
   curl -s -X POST http://localhost:8080/api/admin/fail/stop > /dev/null
 
-  # 每个期望 alertname 各取最新一条 COMPLETED 输出（每行一条 incident）
+  # for each expected alertname, take the latest COMPLETED output (one incident per row)
   local rows_found=0
   for a in "${alerts[@]}"; do
     local row
@@ -116,17 +119,17 @@ run_case() {
     fi
   done
   [ $rows_found -eq 0 ] && echo "$(date +%H:%M:%S),$fault,TIMEOUT,,,,,," >> "$OUT"
-  sleep 5  # 给告警一点回落时间
+  sleep 5  # give alerts a little time to settle back
 }
 
-# 单故障基线（error ~90s / latency ~90s / memory ~4-6min）
+# single-fault baselines (error ~90s / latency ~90s / memory ~4-6min)
 if [ "$MODE" != "composite" ]; then
   run_case error 180
   run_case latency 180
   run_case memory 420
 fi
 
-# 复合故障（判别力矩阵：两告警独立分析，各中各自根因）
+# composite faults (discrimination matrix: two alerts analyzed independently, each hits its own root cause)
 if [ "$MODE" != "single" ]; then
   run_case error+latency 420
   run_case latency+memory 600

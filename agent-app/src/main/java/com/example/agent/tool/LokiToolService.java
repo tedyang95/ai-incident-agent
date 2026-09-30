@@ -29,9 +29,10 @@ public class LokiToolService {
     private final RestTemplate restTemplate = new RestTemplate();
 
     /**
-     * 最近一次成功执行的查询记录（v9 证据链可执行化）。
-     * AlertAnalysisService 调用工具后读取，用于构建 EVIDENCE INDEX。
-     * 注意：分析流程为同步单线程，实例字段足够；如改多线程需改为 ThreadLocal。
+     * The query record from the most recent successful search (v9 executable evidence).
+     * AlertAnalysisService reads this after tool invocation to build the EVIDENCE INDEX.
+     * Note: the analysis flow is synchronous single-threaded, so an instance field
+     * is sufficient; switch to ThreadLocal if it ever becomes multi-threaded.
      */
     private volatile QueryRecord lastQueryRecord;
 
@@ -51,12 +52,12 @@ public class LokiToolService {
      */
     public String searchLogs(String service, String keyword, int minutes, int limit) {
         try {
-            // Loki LogQL 查询: {service="demo-app"} |= "keyword"
+            // Loki LogQL expression: {service="demo-app"} |= "keyword"
             String logql = "{service=\"" + service + "\"} |= `" + keyword + "`";
             String end = String.valueOf(Instant.now().getEpochSecond()) + "000000000";
             String start = String.valueOf(Instant.now().minus(minutes, ChronoUnit.MINUTES).getEpochSecond()) + "000000000";
 
-            // 使用 URI 模板变量：让 RestTemplate 负责正确的 URL 编码
+            // URI template variables: let RestTemplate handle URL encoding.
             String url = lokiUrl + "/loki/api/v1/query_range"
                     + "?query={query}"
                     + "&start={start}"
@@ -133,7 +134,7 @@ public class LokiToolService {
     public String searchLogsBetween(String service, String keyword, Instant from, Instant to, int limit, String excludeKeyword) {
         try {
             // Loki LogQL: {service="demo-app"} |= "keyword" != "excludeKeyword"
-            // 多个 line filter 运算符（|= 包含 / != 排除）可以组合
+            // Multiple line-filter operators (|= include / != exclude) can be combined.
             StringBuilder logql = new StringBuilder();
             logql.append("{service=\"").append(service).append("\"} |= `").append(keyword).append("`");
             if (excludeKeyword != null && !excludeKeyword.isBlank()) {

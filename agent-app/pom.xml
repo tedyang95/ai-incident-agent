@@ -16,7 +16,7 @@
     <artifactId>agent-app</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>agent-app</name>
-    <description>AI Incident Triage Agent - 接收告警、调用工具、RAG检索、根因分析</description>
+    <description>AI Incident Triage Agent - receives alerts, calls tools, retrieves runbooks, analyzes root causes</description>
 
     <properties>
         <java.version>17</java.version>
@@ -42,13 +42,13 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- Spring AI OpenAI - LLM 集成 -->
+        <!-- Spring AI OpenAI - LLM integration -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
         </dependency>
 
-        <!-- 数据访问 - PostgreSQL -->
+        <!-- Data access - PostgreSQL -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -69,7 +69,7 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
-        <!-- 工具类 -->
+        <!-- Utility -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -79,7 +79,7 @@
             <artifactId>slf4j-api</artifactId>
         </dependency>
 
-        <!-- 测试 -->
+        <!-- Testing -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

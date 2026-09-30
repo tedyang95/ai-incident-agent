@@ -2,7 +2,7 @@
 
 > What this test suite proves, how it tests it, and why it is designed this way.
 > Companion code: `agent-app/src/test/java/com/example/agent/service/AlertAnalysisServiceTest.java` (7 tests)
-> 中文版: [docs/TESTING-STRATEGY-zh.md](docs/TESTING-STRATEGY-zh.md)
+> Chinese version: [docs/TESTING-STRATEGY-zh.md](docs/TESTING-STRATEGY-zh.md)
 
 ---
 

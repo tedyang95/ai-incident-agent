@@ -16,7 +16,7 @@
     <artifactId>demo-app</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>demo-app</name>
-    <description>被监控的示例电商应用 - 产生日志和指标</description>
+    <description>Monitored sample e-commerce app - emits logs and metrics</description>
 
     <properties>
         <java.version>17</java.version>
@@ -29,7 +29,7 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- Actuator - 暴露 metrics endpoint 给 Prometheus -->
+        <!-- Actuator - exposes a metrics endpoint to Prometheus -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
@@ -39,7 +39,7 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
-        <!-- 数据访问（模拟数据库） -->
+        <!-- Data access (simulated database) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -50,7 +50,7 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- 测试 -->
+        <!-- Testing -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

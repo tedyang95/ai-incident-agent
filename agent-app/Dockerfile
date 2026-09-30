@@ -8,7 +8,7 @@ RUN mvn clean package -DskipTests -B
 
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
-# 复制 runbooks 目录到容器内（RAG 知识库）
+# Copy runbooks into the image (RAG knowledge base)
 COPY --from=build /app/target/*.jar app.jar
 COPY runbooks /app/runbooks
 EXPOSE 8081

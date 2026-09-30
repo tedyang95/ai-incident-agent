@@ -28,9 +28,10 @@ public class PrometheusToolService {
     private final RestTemplate restTemplate = new RestTemplate();
 
     /**
-     * 本分析流程中成功执行过的全部查询记录（v9 证据链可执行化）。
-     * getServiceOverview() 会执行多条 PromQL，全部记录；用 volatile 引用替换保证并发安全。
-     * AlertAnalysisService 调用工具后读取，用于构建 EVIDENCE INDEX。
+     * All queries that succeeded during this analysis run (v9 executable evidence).
+     * getServiceOverview() executes several PromQL queries and records all of them;
+     * a volatile reference swap keeps it thread-safe.
+     * AlertAnalysisService reads this after tool invocation to build the EVIDENCE INDEX.
      */
     private volatile List<QueryRecord> lastQueryRecords = new ArrayList<>();
 
@@ -47,8 +48,9 @@ public class PrometheusToolService {
      */
     public String query(String query) {
         try {
-            // 使用 URI 模板变量：让 RestTemplate 负责正确的 URL 编码
-            // （避免手写 encode 造成 % 二次编码，导致 PromQL 解析失败）
+            // URI template variables: let RestTemplate handle URL encoding.
+            // (Avoids double-encoding of '%' by hand-written encode, which would
+            // break the PromQL expression.)
             String url = prometheusUrl + "/api/v1/query?query={query}";
             @SuppressWarnings("unchecked")
             Map<String, Object> response = restTemplate.getForObject(url, Map.class, query);
@@ -99,24 +101,25 @@ public class PrometheusToolService {
      * Fetches a key metrics overview for a service, used to build the analysis context.
      */
     public String getServiceOverview(String service) {
-        // 每次 overview 开始重置查询记录（保证 EVIDENCE INDEX 只包含本次分析的真实查询）
+        // Reset the query records at the start of every overview, so the
+        // EVIDENCE INDEX only contains queries from this analysis.
         lastQueryRecords = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
         sb.append("=== Service Overview: ").append(service).append(" ===\n\n");
 
-        // 1. 服务是否在线
+        // 1. Is the service up?
         sb.append("[Up/Down]\n").append(query("up{job='" + service + "'}")).append("\n");
 
-        // 2. 请求速率
+        // 2. Request rate
         sb.append("[Request Rate]\n").append(query("rate(http_server_requests_seconds_count{job='" + service + "'}[5m])")).append("\n");
 
-        // 3. 错误率
+        // 3. Error rate
         sb.append("[Error Rate]\n").append(query("rate(http_server_requests_seconds_count{job='" + service + "',status=~'5..'}[5m])")).append("\n");
 
-        // 4. p99 延迟
+        // 4. p99 latency
         sb.append("[p99 Latency]\n").append(query("histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{job='" + service + "'}[5m]))")).append("\n");
 
-        // 5. JVM 堆内存使用率
+        // 5. JVM heap usage
         sb.append("[JVM Heap Usage]\n").append(query("jvm_memory_used_bytes{job='" + service + "',area='heap'} / jvm_memory_max_bytes{job='" + service + "',area='heap'}")).append("\n");
 
         return sb.toString();

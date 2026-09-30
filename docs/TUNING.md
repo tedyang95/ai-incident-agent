@@ -3,7 +3,7 @@
 > How this AI system was iteratively tuned toward accurate diagnosis: what changed each round, what was observed, and why it was changed.
 > Companion tooling: `docs/eval/run_baseline.sh` (evaluation), `docs/eval/check_grounding.py` (citation-veracity checker)
 > Data: `docs/eval/baseline_results_{v1..v9}.csv`, plus the PostgreSQL `incidents` table (every raw analysis is queryable by id)
-> 中文版: [docs/TUNING-zh.md](docs/TUNING-zh.md)
+> Chinese version: [docs/TUNING-zh.md](docs/TUNING-zh.md)
 
 ---
 

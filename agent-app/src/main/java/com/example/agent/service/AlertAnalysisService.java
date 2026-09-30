@@ -403,8 +403,9 @@ public class AlertAnalysisService {
     }
 
     /**
-     * 把 EVIDENCE INDEX 渲染进 prompt（v9）。
-     * 每一行：编号 + 来源 + 真实查询 + 摘要 + 时间窗。LLM 只能引用这些编号。
+     * Renders the EVIDENCE INDEX into the prompt (v9).
+     * One line per entry: index + source + real query + summary + window.
+     * The LLM may only cite these indexes.
      */
     private String buildEvidenceIndexPrompt(List<Evidence> evidenceList) {
         if (evidenceList.isEmpty()) {
@@ -423,10 +424,13 @@ public class AlertAnalysisService {
     }
 
     /**
-     * 把 LLM 输出中引用的 [E{n}] 编号映射为可执行 citation（v9 核心）。
+     * Resolves every {@code [E{n}]} index cited by the LLM into an executable
+     * citation (v9 core).
      * <p>
-     * 关键安全设计：query 和 url 只来自后端的 evidenceList（工具真实执行的查询），
-     * LLM 引用不存在的编号 → resolved=false 且不含任何 query/url——LLM 无法伪造证据。
+     * Key security design: query and url come only from the backend
+     * evidenceList (queries the tools really executed). If the LLM cites an
+     * index that does not exist, the citation is resolved=false with no
+     * query/url — the model cannot fabricate evidence.
      */
     private String buildEvidenceCitationsJson(String llmOutput, List<Evidence> evidenceList) {
         try {
@@ -436,7 +440,7 @@ public class AlertAnalysisService {
                 try {
                     cited.add(Integer.parseInt(m.group(1)));
                 } catch (NumberFormatException ignored) {
-                    // 非数字编号（如 [Error]），忽略
+                    // Non-numeric bracket text (e.g. [Error]) — ignore.
                 }
             }
 
@@ -460,7 +464,7 @@ public class AlertAnalysisService {
                     }
                     c.put("resolved", true);
                 } else {
-                    c.put("resolved", false); // 伪造/不存在的编号：不可解析，无 query/url
+                    c.put("resolved", false); // fabricated/unknown index: not resolvable, no query/url
                 }
                 citations.add(c);
             }
@@ -472,8 +476,9 @@ public class AlertAnalysisService {
     }
 
     /**
-     * 生成 Grafana Explore 深链 URL（后端拼装，LLM 不参与）。
-     * 点击即可在 Grafana 中复现该证据查询——"证据链可执行化"的可视化落点。
+     * Builds a Grafana Explore deep-link URL (assembled backend-side; the LLM
+     * never participates). One click reproduces the evidence query in Grafana —
+     * the visual landing point of the "executable evidence chain".
      */
     private String buildGrafanaExploreUrl(String datasource, String expr) {
         try {
