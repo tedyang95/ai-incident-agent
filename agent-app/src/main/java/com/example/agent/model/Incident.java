@@ -68,6 +68,14 @@ public class Incident {
     @Column(columnDefinition = "TEXT")
     private String contextSnapshot; // 喂给 LLM 的完整上下文快照（JSON，审计/grounding 验证用）
 
+    // 判别力字段（复合故障评估用）：
+    // LLM 观察到的竞争信号（其他并发故障的迹象）与证据归属判断
+    @Column(columnDefinition = "TEXT")
+    private String competingSignals; // JSON 数组：competing_signals_observed
+
+    @Column(columnDefinition = "TEXT")
+    private String evidenceAlignment; // consistent / conflicting / insufficient
+
     // 状态
     @Enumerated(EnumType.STRING)
     private AnalysisStatus status; // PENDING / ANALYZING / COMPLETED / FAILED
@@ -142,6 +150,12 @@ public class Incident {
 
     public String getContextSnapshot() { return contextSnapshot; }
     public void setContextSnapshot(String contextSnapshot) { this.contextSnapshot = contextSnapshot; }
+
+    public String getCompetingSignals() { return competingSignals; }
+    public void setCompetingSignals(String competingSignals) { this.competingSignals = competingSignals; }
+
+    public String getEvidenceAlignment() { return evidenceAlignment; }
+    public void setEvidenceAlignment(String evidenceAlignment) { this.evidenceAlignment = evidenceAlignment; }
 
     public AnalysisStatus getStatus() { return status; }
     public void setStatus(AnalysisStatus status) { this.status = status; }

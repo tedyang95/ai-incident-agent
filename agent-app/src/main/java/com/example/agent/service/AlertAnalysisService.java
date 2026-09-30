@@ -121,21 +121,30 @@ public class AlertAnalysisService {
         // 1b. Loki 日志检索（告警语义关键词 + correlation window）
         //     关键词由告警类别驱动：latency 告警也搜 slow/sleep/timeout 信号，
         //     而不只查 ERROR/Exception（latency 故障通常是 WARN/DEBUG 日志，无异常堆栈）
+        //
+        //     检索层判别（retrieval discrimination）：
+        //     - latency 关键词只用故障注入独有的标记（sleeping / Latency fault），
+        //       去掉通用 "timeout"（并发 error 故障的异常信息 "database connection
+        //       timeout" 恰好含该词，会造成证据污染）
+        //     - 非 error-rate 告警在 LogQL 层排除 "RuntimeException"：并发 error 故障
+        //       的异常堆栈不会进入本告警上下文（!= 运算符）
         Instant alertInstant = incident.getReceivedAt().toInstant(ZoneOffset.UTC);
         Instant logFrom = alertInstant.minus(2, ChronoUnit.MINUTES);
         Set<String> keywords = new LinkedHashSet<>();
         keywords.add("ERROR");
         keywords.add("Exception");
         String cat = incident.getCategory() == null ? "" : incident.getCategory();
+        String excludeKeyword = "error-rate".equals(cat) ? null : "RuntimeException";
         switch (cat) {
-            case "latency" -> keywords.addAll(List.of("sleeping", "Latency fault", "timeout"));
+            case "latency" -> keywords.addAll(List.of("sleeping", "Latency fault"));
             case "resource" -> keywords.addAll(List.of("OutOfMemory", "memory"));
             case "error-rate" -> keywords.addAll(List.of("RuntimeException"));
             default -> { }
         }
         StringBuilder logsBuilder = new StringBuilder();
         for (String kw : keywords) {
-            logsBuilder.append(lokiTool.searchLogsBetween(incident.getService(), kw, logFrom, alertInstant, 10)).append("\n");
+            logsBuilder.append(lokiTool.searchLogsBetween(
+                    incident.getService(), kw, logFrom, alertInstant, 10, excludeKeyword)).append("\n");
         }
         String logs = logsBuilder.toString();
         incident.setRelatedLogs(truncate(logs, 2000));
@@ -233,12 +242,30 @@ public class AlertAnalysisService {
                    evidence; 0.2-0.4 = weak/indirect evidence; below 0.2 = no evidence.
                    evidence_strength must be consistent: strong = quoted metric + log,
                    moderate = one quoted piece, weak/insufficient = none.
+                8. DISCRIMINATION AGAINST CONCURRENT SIGNALS (CRITICAL): The retrieved
+                   context MAY contain evidence from OTHER, concurrent incidents — this is
+                   expected in production. Before concluding:
+                   a. Identify signals that do NOT match THIS alert's metric signature.
+                      Metric signature means: error-rate alerts are driven by error rate /
+                      5xx counts; latency alerts by p99/avg latency; memory alerts by JVM
+                      heap usage. Evidence that does NOT move THIS alert's metric belongs
+                      to a different fault mode.
+                   b. Report such signals in competing_signals_observed. Do NOT let them
+                      become your primary root cause.
+                   c. If competing signals cannot be fully excluded, cap confidence at 0.5
+                      and set evidence_alignment to "conflicting".
+                9. REASONING ORDER: work through 3 steps explicitly in analysis_detail —
+                   (1) evidence most relevant to THIS alert's metric signature;
+                   (2) competing signals observed and why they belong to a different
+                   fault mode; (3) final conclusion.
 
                 Output format (JSON only, no markdown):
                 {
                   "root_cause_hypothesis": "One sentence summary of the most likely root cause",
                   "analysis_detail": "Detailed analysis referencing specific metrics and log evidence",
                   "suggested_actions": ["Action 1", "Action 2", "Action 3"],
+                  "competing_signals_observed": ["signal 1", "signal 2"],
+                  "evidence_alignment": "consistent|conflicting|insufficient",
                   "confidence": 0.0,
                   "evidence_strength": "strong|moderate|weak|insufficient"
                 }
@@ -314,6 +341,11 @@ public class AlertAnalysisService {
             }
 
             incident.setConfidence(json.path("confidence").asDouble(0.0));
+
+            // 判别力字段（competing signals / evidence alignment）：
+            // 复合故障评估用，可量化"系统是否识别出并发信号并保持判别力"
+            incident.setCompetingSignals(json.path("competing_signals_observed").toString());
+            incident.setEvidenceAlignment(json.path("evidence_alignment").asText(""));
 
             log.info("Parsed analysis: confidence={}, rootCause={}",
                     incident.getConfidence(), incident.getRootCauseHypothesis());

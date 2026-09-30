@@ -32,6 +32,48 @@
       "expected_root_cause_keywords": ["memory", "heap", "leak", "old gen", "allocation"],
       "expected_category": "resource",
       "expected_confidence_min": 0.5
+    },
+    {
+      "id": "case-004",
+      "fault": "composite-error-latency",
+      "alerts_expected": ["HighErrorRate", "HighLatency"],
+      "inject": { "method": "POST", "urls": ["/api/admin/fail/error", "/api/admin/fail/latency"] },
+      "traffic": { "type": "POST /api/orders + GET /api/products", "note": "双故障同时注入：error 抛 500，latency 全请求 sleep 2-5s" },
+      "expected_root_cause_keywords": {
+        "HighErrorRate": ["api/orders", "runtimeexception", "500", "error rate"],
+        "HighLatency": ["latency", "delay", "slow", "p99", "sleep"]
+      },
+      "expected_categories": { "HighErrorRate": "error-rate", "HighLatency": "latency" },
+      "expected_confidence_min": 0.5,
+      "evaluation_note": "判别力（discrimination）：两个独立根因都要被识别。HighErrorRate 的 Incident 必须命中 error 关键词（不被 p99 飙升带偏成 latency）；HighLatency 的 Incident 必须命中 latency 关键词（不被 500/RuntimeException 日志带偏成 error）"
+    },
+    {
+      "id": "case-005",
+      "fault": "composite-latency-memory",
+      "alerts_expected": ["HighLatency", "HighMemoryUsage"],
+      "inject": { "method": "POST", "urls": ["/api/admin/fail/latency", "/api/admin/fail/memory"] },
+      "traffic": { "type": "GET /api/products", "note": "latency 请求延迟 + memory 线程泄漏同时发生" },
+      "expected_root_cause_keywords": {
+        "HighLatency": ["latency", "delay", "slow", "p99", "sleep"],
+        "HighMemoryUsage": ["memory", "heap", "leak", "old gen", "allocation"]
+      },
+      "expected_categories": { "HighLatency": "latency", "HighMemoryUsage": "resource" },
+      "expected_confidence_min": 0.5,
+      "evaluation_note": "判别力：HighLatency 的 Incident 必须命中 latency 关键词（不被 heap 飙升带偏）；HighMemoryUsage 的 Incident 必须命中 memory 关键词（不被 sleeping 日志带偏）"
+    },
+    {
+      "id": "case-006",
+      "fault": "composite-error-memory",
+      "alerts_expected": ["HighErrorRate", "HighMemoryUsage"],
+      "inject": { "method": "POST", "urls": ["/api/admin/fail/error", "/api/admin/fail/memory"] },
+      "traffic": { "type": "POST /api/orders", "note": "error 抛 500 + memory 线程泄漏同时发生" },
+      "expected_root_cause_keywords": {
+        "HighErrorRate": ["api/orders", "runtimeexception", "500", "error rate"],
+        "HighMemoryUsage": ["memory", "heap", "leak", "old gen", "allocation"]
+      },
+      "expected_categories": { "HighErrorRate": "error-rate", "HighMemoryUsage": "resource" },
+      "expected_confidence_min": 0.5,
+      "evaluation_note": "判别力：HighErrorRate 的 Incident 必须命中 error 关键词（不被 heap 飙升带偏）；HighMemoryUsage 的 Incident 必须命中 memory 关键词（不被 500 日志带偏）"
     }
   ]
 }

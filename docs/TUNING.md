@@ -75,16 +75,31 @@
 - **结果**：**3/3 命中**（error 0.8 / latency 0.9 / memory 0.7），**grounding 100%**（metric 3/3、log 2/2）
 - **教训**：**工具的函数签名（这里=搜索关键词）应该适配任务语义**——只搜 ERROR 会漏掉 latency 案的全部证据
 
+### v8 — 复合故障 3×2：检索层判别 + prompt 判别指令（判别力 discrimination）
+- **背景**：评估集扩到 3 个复合故障 case（error+latency / latency+memory / error+memory）——两告警独立投递、两个 Incident 各自命中各自根因。第一轮复合 baseline 暴露：**HighLatency 被并发 error 故障的异常堆栈污染，错判根因 = "database connection timeouts + RuntimeException"（confidence 0.8 自信错判）**。机制：latency 检索词 "timeout" 恰好命中 error 异常信息 "database connection timeout (simulated)"，异常堆栈被检索进 latency 上下文。
+- **改动（治本）**：
+  - latency 关键词去掉通用 `timeout`，只用故障注入独有标记（`sleeping` / `Latency fault`）
+  - 非 error-rate 告警在 **LogQL 层排除 `!= "RuntimeException"`**（并发 error 故障的异常堆栈不再进入本告警上下文）
+- **改动（兜底）**：system prompt 新增规则 8/9——**判别指令**（证据必须与本告警的指标签名一致：error-rate↔error rate / latency↔p99 / memory↔heap；竞争信号写入 `competing_signals_observed`，不得成为主根因；无法排除时 confidence 封顶 0.5）+ **显式三步推理**（本告警证据 → 竞争信号甄别 → 结论）
+- **改动（可评估）**：输出新增 `competing_signals_observed` / `evidence_alignment` 字段（判别力可量化）；`run_baseline.sh` 支持复合注入与双告警等待
+- **结果**：**9/9 命中**（单故障 3/3 + 复合 3/3）；**grounding 100%**（metric 8/8、log 8/8）
+  - 关键翻正：复合 error+latency 中 HighLatency **0.8 错判 → 0.9 正确**（根因 = "delay 2-5s"），`evidence_alignment=consistent`，`competing_signals=[]`——检索层修好后**模型根本没有到竞争信号**（治本优于兜底）
+  - 单故障对比 v7b：error 0.8→0.9、memory 0.7→0.8、latency 0.9 保持（无退化）
+- **新发现**：#94（error+memory 复合中 HighMemoryUsage）根因正确但 confidence **0.4**（只有 metric 证据、无 ERROR 日志 → 按规则弱校准）。与上一轮同场景 0.7 存在波动——**正确降置信是校准正确的表现，但置信度稳定性待观察**（LLM 输出波动 + 新规则更保守）
+- **教训**：**判别力 = 检索隔离（上游，别把脏证据喂进来）+ 指标签名核对（下游，让模型会识别）**；修好上游后，下游的兜底指令几乎不需要触发（#85 未观察到竞争信号）
+
 ---
 
 ## 3. 量化总结（Summary）
 
 | 指标 | 起始 | 最终 |
 |---|---|---|
-| 故障命中率 | 2/3（v1） | **3/3（v7b）** |
-| 引用真实性（grounding） | 0%（v2 全是编造） | **100%（metric 3/3 + log 2/2 逐字）** |
-| latency 诊断置信度 | 0.5（无证据） | **0.9（找到故障注入日志）** |
+| 故障命中率 | 2/3（v1） | **9/9（v8：单故障 3/3 + 复合 3/3）** |
+| 引用真实性（grounding） | 0%（v2 全是编造） | **100%（v8：metric 8/8 + log 8/8 逐字）** |
+| latency 诊断置信度 | 0.5（无证据） | **0.9**（alert-aware 检索 + 复合判别） |
 | error 诊断置信度 | 0.7 | **0.9**（correlation window 后） |
+| memory 诊断置信度 | 0.7 | **0.8**（单故障；复合下无日志证据时正确降置信 0.4） |
+| 复合判别力（discrimination） | 第一轮 2/3（HighLatency 被污染错判） | **3/3**（检索层排除后翻正） |
 | Loki 日志链路 | HTTP 400（第一天就坏） | **HTTP 200，streams 0→1** |
 
 ---

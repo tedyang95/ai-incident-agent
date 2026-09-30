@@ -21,6 +21,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -104,8 +106,8 @@ class AlertAnalysisServiceTest {
     /** mock 三路取证工具：指标、日志、runbook 都正常返回 */
     private void mockToolsReturn(String metrics, String logs, String runbooks) {
         when(prometheusTool.getServiceOverview(anyString())).thenReturn(metrics);
-        when(lokiTool.getRecentErrors(anyString(), anyInt())).thenReturn(logs);
-        when(lokiTool.getRecentExceptions(anyString(), anyInt())).thenReturn("");
+        when(lokiTool.searchLogsBetween(anyString(), anyString(), any(), any(), anyInt(), any()))
+                .thenReturn(logs);
         when(runbookRetrieval.retrieve(anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(runbooks);
     }
@@ -171,7 +173,7 @@ class AlertAnalysisServiceTest {
         // ============================================================
         // 4a. 三路取证确实发生在 LLM 调用之前
         verify(prometheusTool).getServiceOverview("demo-app");
-        verify(lokiTool).getRecentErrors("demo-app", 15);
+        verify(lokiTool, atLeast(1)).searchLogsBetween(eq("demo-app"), anyString(), any(), any(), anyInt(), any());
         verify(runbookRetrieval).retrieve(
                 "HighErrorRate", "demo-app", "error-rate",
                 "Error rate above 50% for 5 minutes");
@@ -236,7 +238,7 @@ class AlertAnalysisServiceTest {
         // ============================================================
         // 4a. 三路取证发生在 LLM 调用之前
         verify(prometheusTool).getServiceOverview("demo-app");
-        verify(lokiTool).getRecentErrors("demo-app", 15);
+        verify(lokiTool, atLeast(1)).searchLogsBetween(eq("demo-app"), anyString(), any(), any(), anyInt(), any());
         verify(runbookRetrieval).retrieve(
                 "HighErrorRate", "demo-app", "error-rate",
                 "Error rate above 50% for 5 minutes");

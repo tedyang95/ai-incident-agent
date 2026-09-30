@@ -105,16 +105,26 @@ public class LokiToolService {
      * 与告警触发时刻对齐：只查告警前 N 分钟到告警时刻的日志（根因发生在告警前），
      * 避免"当前时间往前 N 分钟"的滑动窗口把相邻告警/上一故障的残留日志带进来。
      *
-     * @param service  服务名，用于过滤
-     * @param keyword  搜索关键词
-     * @param from     窗口起点（告警触发时刻 - N 分钟）
-     * @param to       窗口终点（告警触发时刻）
-     * @param limit    返回最大条数
+     * @param service        服务名，用于过滤
+     * @param keyword        搜索关键词
+     * @param from           窗口起点（告警触发时刻 - N 分钟）
+     * @param to             窗口终点（告警触发时刻）
+     * @param limit          返回最大条数
+     * @param excludeKeyword 排除关键词（检索层过滤：LogQL `!=` 排除其他故障模式的
+     *                       特征信号，如非 error-rate 告警排除 "RuntimeException"，
+     *                       防止并发故障的异常堆栈污染本告警上下文）
      * @return 日志文本摘要
      */
-    public String searchLogsBetween(String service, String keyword, Instant from, Instant to, int limit) {
+    public String searchLogsBetween(String service, String keyword, Instant from, Instant to, int limit, String excludeKeyword) {
         try {
-            String logql = "{service=\"" + service + "\"} |= `" + keyword + "`";
+            // Loki LogQL: {service="demo-app"} |= "keyword" != "excludeKeyword"
+            // 多个 line filter 运算符（|= 包含 / != 排除）可以组合
+            StringBuilder logql = new StringBuilder();
+            logql.append("{service=\"").append(service).append("\"} |= `").append(keyword).append("`");
+            if (excludeKeyword != null && !excludeKeyword.isBlank()) {
+                logql.append(" != `").append(excludeKeyword).append("`");
+            }
+
             String start = String.valueOf(from.getEpochSecond()) + "000000000";
             String end = String.valueOf(to.getEpochSecond()) + "000000000";
 
@@ -125,7 +135,7 @@ public class LokiToolService {
                     + "&limit={limit}";
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> response = restTemplate.getForObject(url, Map.class, logql, start, end, limit);
+            Map<String, Object> response = restTemplate.getForObject(url, Map.class, logql.toString(), start, end, limit);
 
             if (response == null || !"success".equals(response.get("status"))) {
                 return "Loki query failed: " + response;

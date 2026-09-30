@@ -1,0 +1,7 @@
+time,fault,incident_id,alertname,status,confidence,prompt_tokens,completion_tokens,duration_ms,root_cause
+23:52:01,error+latency,67|HighErrorRate|COMPLETED|0.8|5690|324|6017|ThehigherrorrateislikelycausedbysimulateddatabaseconnectiontimeoutsresultinginRuntimeExceptionsduringordercreation.
+23:52:01,error+latency,66|HighLatency|COMPLETED|0.8|5883|247|6189|Thehighp99latencyislikelycausedbysimulateddatabaseconnectiontimeouts,asindicatedbythelogsandthehighlatencymetricsforrequeststhatencounteredaRuntimeException.
+23:57:24,latency+memory,70|HighLatency|COMPLETED|0.8|4075|246|4701|Thehighp99latencyislikelycausedbyafaultinjectionthatintroducesadelayof2-5secondsforallrequests.
+23:57:24,latency+memory,71|HighMemoryUsage|COMPLETED|0.5|3907|286|4179|ThehighJVMheapmemoryusageislikelyduetoamemoryleakorexcessivememoryconsumptionbytheapplication,asindicatedbytheJVMheapusagemetricbeingabove85%formorethan2minutes.
+00:02:58,error+memory,75|HighErrorRate|COMPLETED|0.8|6000|328|5615|Thehigherrorrateislikelycausedbyasimulateddatabaseconnectiontimeout,resultinginRuntimeExceptionsduringordercreation.
+00:02:58,error+memory,76|HighMemoryUsage|COMPLETED|0.7|3913|382|5896|ThehighJVMheapmemoryusageislikelyduetoamemoryleakorexcessivememoryconsumption,asindicatedbytheJVMheapusagemetricbeingat98.66%[metric:jvm_memory_used_bytes{area='heap'}/jvm_memory_max_bytes{job='demo-app',area='heap'}=0.9866397234858298]andtheabsenceofrelevanterrorlogs[log:"Nologsfoundforservice='demo-app',keyword='ERROR'incorrelationwindow."]suggestingnoimmediateexceptionswerelogged.
