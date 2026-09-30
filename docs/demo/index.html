@@ -171,6 +171,17 @@
   .ev-toggle { color: var(--muted); font-size: 11px; }
   .ev-body { display: none; border-top: 1px solid var(--border); padding: 12px 14px; }
   .ev-body.open { display: block; }
+  .ev-saw-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--green); font-weight: 700; margin-bottom: 6px; }
+  .ev-lines {
+    background: #0b0e14; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--text);
+    white-space: pre-wrap; word-break: break-all; line-height: 1.55;
+  }
+  .ev-query-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); font-weight: 700; margin: 14px 0 6px; }
+  .ev-note {
+    font-size: 12px; color: var(--muted); background: rgba(139,152,173,.08);
+    border: 1px dashed rgba(139,152,173,.3); border-radius: 8px; padding: 10px 12px; margin-top: 10px; line-height: 1.5;
+  }
   .ev-query {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--accent);
     background: #0b0e14; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
@@ -342,53 +353,61 @@
    (ids 97 / 99 / 101; single-fault runs of the v9 evaluation)
    ================================================================ */
 const SCENARIOS = {
+  /* Real data — v9 evaluation runs from baseline_results_v9.csv + PostgreSQL.
+     error = incident #104, latency = #103, memory = #101 (all genuine v9 runs,
+     with their actual evidence_citations resolved from the backend). */
   error: {
     icon: "🔥",
     alertname: "HighErrorRate",
-    incidentId: 97,
+    incidentId: 104,
     model: "gpt-4o-mini",
-    promptTokens: 6724,
-    completionTokens: 337,
-    durationMs: 4279,
+    promptTokens: 6938,
+    completionTokens: 326,
+    durationMs: 4150,
     confidence: 0.9,
-    rootCause: "The high error rate is likely caused by a simulated database connection timeout, resulting in a significant number of RuntimeExceptions.",
-    detail: "Error rate for demo-app spiked to ~69% (5xx responses from POST /api/orders). Metrics confirm the spike; logs show RuntimeException stack traces in the orders endpoint.",
+    rootCause: "The high error rate is likely caused by a simulated database connection timeout, resulting in RuntimeExceptions during order creation.",
+    detail: "Real v9 evaluation verdict (incident #104). The agent confirmed the spike through its metrics tool, then correlated the RuntimeException stack traces in the logs — and every claim below resolves to the exact query that produced it.",
     actions: [
-      "Investigate the fault-injection mechanism — if it's a drill, disable it temporarily",
-      "Monitor database connection-pool metrics; the pool may be exhausted under load",
-      "Review recent deployments: a connection-timeout regression is a common trigger"
+      "Investigate the cause of the simulated database connection timeout and resolve it.",
+      "Review the database connection pool settings to ensure they can handle the expected load.",
+      "Consider removing or adjusting the fault injection mechanism if it is not intended for production use."
     ],
     evidence: [
-      { idx: 1, source: "METRICS", summary: "5xx error rate ≈ 0.69 (69% of requests failing)", window: "alert −5m → now",
-        query: "rate(http_server_requests_seconds_count{job='demo-app',status=~'5..'}[5m])" },
-      { idx: 2, source: "METRICS", summary: "Service is up (1 series) — not a down outage", window: "instant",
-        query: "up{job='demo-app'}" },
-      { idx: 3, source: "LOGS", summary: "3 matching lines: RuntimeException at OrdersController", window: "correlation [alert−2min, alert]",
-        query: "{service=\"demo-app\"} |= `ERROR` != `RuntimeException`" }
+      { idx: 4, source: "METRICS", summary: "5xx error rate — 1 series (5m window)", window: "instant",
+        query: "rate(http_server_requests_seconds_count{job='demo-app',status=~'5..'}[5m])",
+        saw: ["5xx error rate (status=~'5..') over 5m → 1 series returned"] },
+      { idx: 10, source: "LOGS", summary: "10 matching log lines: RuntimeException at order creation", window: "correlation [alert−2min, alert] · 19:27:10Z → 19:29:10Z",
+        query: "{service=\"demo-app\"} |= `RuntimeException`",
+        saw: [
+          "WARN  EcommerceController — FAULT INJECTION: Error fault ENABLED - all POST /api/orders will return 500",
+          "ERROR EcommerceController — Error fault injected: throwing RuntimeException for order creation",
+          "ERROR dispatcherServlet — Request processing failed: java.lang.RuntimeException: Injected fault: database connection timeout (simulated)",
+          "… 7 more matching lines (elided)"
+        ] }
     ]
   },
   latency: {
     icon: "🐢",
     alertname: "HighLatency",
-    incidentId: 99,
+    incidentId: 103,
     model: "gpt-4o-mini",
-    promptTokens: 4825,
-    completionTokens: 261,
-    durationMs: 3185,
+    promptTokens: 5001,
+    completionTokens: 311,
+    durationMs: 3875,
     confidence: 0.9,
-    rootCause: "The high p99 latency is likely caused by a fault injection that introduces a delay of 2–5 seconds for all requests.",
-    detail: "p99 latency measured at 5.66s — well above the 1s threshold. Logs contain the fault-injection marker ('sleeping' / 'Latency fault ENABLED'), confirming a synthetic delay rather than a slow database.",
+    rootCause: "The high p99 latency is likely caused by a fault injection that introduces a delay of 2-5 seconds for all requests.",
+    detail: "Real v9 evaluation verdict (incident #103). p99 measured at 5.69s — far above the 1s threshold. Note: the agent also searched logs and found the fault-injection marker, but cited only the metric that proved the diagnosis.",
     actions: [
-      "Disable the latency fault injection to restore normal request processing",
-      "Monitor p99 latency after the fix to confirm it returns below threshold",
-      "Review deployment process: the latency marker is not in normal code paths"
+      "Disable the latency fault injection in the application configuration.",
+      "Monitor the p99 latency metrics after disabling the fault to ensure it returns to normal levels.",
+      "Review the deployment process to prevent accidental enabling of fault injections in production."
     ],
     evidence: [
-      { idx: 1, source: "METRICS", summary: "p99 latency = 5.66s (threshold 1s)", window: "alert −5m → now",
-        query: "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{job='demo-app'}[5m]))" },
-      { idx: 2, source: "LOGS", summary: "Fault-injection marker found: 'Latency fault ENABLED'", window: "correlation [alert−2min, alert]",
-        query: "{service=\"demo-app\"} |= `sleeping`" }
-    ]
+      { idx: 6, source: "METRICS", summary: "p99 = 5.69s (threshold 1s) — 8 series", window: "instant",
+        query: "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{job='demo-app'}[5m]))",
+        saw: ["p99 latency = 5.6948s → 8 series returned (well above the 1s threshold)"] }
+    ],
+    logsNote: "The agent also ran a log search (alert-aware keyword) and saw the fault-injection line — but did not cite it. Citations are selective: the LLM cited only the metric that proved the diagnosis, while the backend still recorded every query it ran."
   },
   memory: {
     icon: "💾",
@@ -400,19 +419,19 @@ const SCENARIOS = {
     durationMs: 4004,
     confidence: 0.8,
     rootCause: "The high JVM heap memory usage is likely due to a memory leak or excessive memory consumption — JVM heap at 98.67% utilization.",
-    detail: "Heap usage metric shows 98.67% — above the 85% threshold for over 2 minutes. No ERROR logs in the correlation window, so the agent correctly lowers its confidence: metric-only evidence, no corroborating logs.",
+    detail: "Real v9 evaluation verdict (incident #101). Heap usage confirmed at 98.67% [E5]. No ERROR logs in the correlation window — the unrelated fault-injection line was correctly excluded [E6] — so the agent honestly calibrates to 0.8 instead of over-claiming.",
     actions: [
-      "Investigate the application's memory-usage patterns for potential leaks",
-      "Consider temporarily increasing JVM heap size to relieve immediate pressure",
-      "Enable detailed garbage-collection logging to analyze allocation behavior"
+      "Investigate the application's memory-usage patterns for potential leaks.",
+      "Consider temporarily increasing JVM heap size to relieve immediate pressure.",
+      "Enable detailed garbage-collection logging to analyze allocation behavior."
     ],
     evidence: [
-      { idx: 1, source: "METRICS", summary: "JVM heap usage = 98.67% (threshold 85%)", window: "alert −5m → now",
-        query: "jvm_memory_used_bytes{job='demo-app',area='heap'} / jvm_memory_max_bytes{job='demo-app',area='heap'}" },
-      { idx: 2, source: "LOGS", summary: "No ERROR logs in window — absence of evidence is evidence of absence", window: "correlation [alert−2min, alert]",
-        query: "{service=\"demo-app\"} |= `ERROR` != `RuntimeException`" },
-      { idx: 3, source: "RUNBOOK", summary: "Matched runbook: High Memory Usage — leak & GC checklist", window: "RAG top-k=3",
-        query: "runbooks/high-error-rate.md · runbooks/high-latency.md · runbooks/service-down.md (keyword scored)" }
+      { idx: 5, source: "METRICS", summary: "JVM heap usage = 98.67% (threshold 85%) — 3 series", window: "instant",
+        query: "jvm_memory_used_bytes{job='demo-app',area='heap'} / jvm_memory_max_bytes{job='demo-app',area='heap'}",
+        saw: ["JVM heap usage = 0.9867 (98.67%) → 3 series returned (heap regions)"] },
+      { idx: 6, source: "LOGS", summary: "1 matching line — unrelated signal, correctly excluded", window: "correlation [alert−2min, alert] · 19:19:10Z → 19:21:10Z",
+        query: "{service=\"demo-app\"} |= `Latency fault` != `RuntimeException`",
+        saw: ["WARN  EcommerceController — FAULT INJECTION: Latency fault ENABLED - all requests will have 2-5s delay"] }
     ],
     lowConfidenceNote: true
   }
@@ -488,11 +507,16 @@ function renderVerdict(s) {
         <span class="ev-toggle">view ▼</span>
       </div>
       <div class="ev-body">
+        <div class="ev-saw-label">What the agent saw</div>
+        <div class="ev-lines">${(e.saw || []).join("\n")}</div>
+        <div class="ev-query-label">Query — reproduce in Grafana</div>
         <div class="ev-query">${e.query}</div>
         <div class="ev-window">window: ${e.window}</div>
-        <div class="ev-hint">The query text above was recorded by the backend tool — the LLM cited the index, it never generated the query. Open it in Grafana Explore and reproduce the evidence yourself.</div>
+        <div class="ev-hint">Recorded by the backend tool — the LLM cited the index [E${e.idx}], it never generated the query. Open it in Grafana Explore and reproduce the evidence yourself.</div>
       </div>
     </div>`).join("");
+
+  const logsNote = s.logsNote ? `<div class="ev-note">${s.logsNote}</div>` : "";
 
   const confNote = s.lowConfidenceNote
     ? `Why ${Math.round(s.confidence * 100)}%? The agent found metric evidence but <b>no ERROR logs</b> — it honestly lowers its confidence instead of over-claiming. That's calibration, not failure.`
@@ -518,8 +542,9 @@ function renderVerdict(s) {
 
     <div class="evid">
       <div class="evid-title">Evidence — every claim is clickable proof</div>
-      <div class="evid-sub">Each citation resolves to the exact query the backend executed. No fabrication — by design.</div>
+      <div class="evid-sub">Open each item: first what the agent actually saw, then the exact query that produced it. No fabrication — by design.</div>
       ${ev}
+      ${logsNote}
     </div>
 
     <div class="actions">
