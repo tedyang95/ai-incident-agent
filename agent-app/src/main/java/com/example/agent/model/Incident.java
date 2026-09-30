@@ -76,6 +76,12 @@ public class Incident {
     @Column(columnDefinition = "TEXT")
     private String evidenceAlignment; // consistent / conflicting / insufficient
 
+    // v9 证据链可执行化：LLM 引用编号 → 后端映射的真实查询 + 可点击深链 URL（JSON 数组）
+    // 每条：{index, source, query, summary, window, url, resolved}
+    // LLM 引用了不存在的编号 → resolved=false，不产生任何 query/url（无法伪造证据）
+    @Column(columnDefinition = "TEXT")
+    private String evidenceCitations;
+
     // 状态
     @Enumerated(EnumType.STRING)
     private AnalysisStatus status; // PENDING / ANALYZING / COMPLETED / FAILED
@@ -156,6 +162,9 @@ public class Incident {
 
     public String getEvidenceAlignment() { return evidenceAlignment; }
     public void setEvidenceAlignment(String evidenceAlignment) { this.evidenceAlignment = evidenceAlignment; }
+
+    public String getEvidenceCitations() { return evidenceCitations; }
+    public void setEvidenceCitations(String evidenceCitations) { this.evidenceCitations = evidenceCitations; }
 
     public AnalysisStatus getStatus() { return status; }
     public void setStatus(AnalysisStatus status) { this.status = status; }

@@ -1,5 +1,7 @@
 package com.example.agent.service;
 
+import com.example.agent.evidence.Evidence;
+import com.example.agent.evidence.QueryRecord;
 import com.example.agent.model.Incident;
 import com.example.agent.rag.RunbookRetrievalService;
 import com.example.agent.repository.IncidentRepository;
@@ -13,15 +15,20 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 告警分析服务 - AI Agent 的核心编排（orchestration）
@@ -171,13 +178,33 @@ public class AlertAnalysisService {
             log.warn("Failed to save context snapshot: {}", e.getMessage());
         }
 
+        // 1e. 构建 EVIDENCE INDEX（v9 证据链可执行化）
+        //     真实执行的查询由后端工具记录（single source of truth），LLM 只能引用编号，
+        //     无法编造 query/URL。深链 URL（Grafana explore）也由后端生成。
+        List<Evidence> evidenceList = new ArrayList<>();
+        int idx = 1;
+        for (QueryRecord qr : prometheusTool.getLastQueryRecords()) {
+            evidenceList.add(Evidence.of(idx++, "PROMETHEUS", qr.query(), qr.summary(), qr.window(),
+                    buildGrafanaExploreUrl("prometheus", qr.query())));
+        }
+        QueryRecord lokiRecord = lokiTool.getLastQueryRecord();
+        if (lokiRecord != null) {
+            evidenceList.add(Evidence.of(idx++, "LOKI", lokiRecord.query(), lokiRecord.summary(),
+                    lokiRecord.window(), buildGrafanaExploreUrl("loki", lokiRecord.query())));
+        }
+        evidenceList.add(Evidence.of(idx, "RUNBOOK",
+                "RAG: alertname=" + incident.getAlertname() + ", category=" + incident.getCategory(),
+                "Retrieved from runbook knowledge base", "alert-time", null));
+        String evidenceIndexPrompt = buildEvidenceIndexPrompt(evidenceList);
+        log.debug("Evidence index built: {} entries", evidenceList.size());
+
         // ============================================================
         // Step 2: 构建 Prompt（Prompt Engineering）
         // ============================================================
         log.info("Step 2: Building prompt for LLM analysis");
 
         String systemPrompt = buildSystemPrompt();
-        String userPrompt = buildUserPrompt(incident, metrics, logs, runbooks);
+        String userPrompt = buildUserPrompt(incident, metrics, logs, runbooks, evidenceIndexPrompt);
 
         // ============================================================
         // Step 3: 调用 LLM（LLM Call）
@@ -205,7 +232,7 @@ public class AlertAnalysisService {
         // ============================================================
         log.info("Step 4: Parsing structured LLM output");
 
-        parseAndSaveAnalysis(incident, llmOutput);
+        parseAndSaveAnalysis(incident, llmOutput, evidenceList);
 
         // 记录分析耗时
         incident.setAnalysisDurationMs(System.currentTimeMillis() - startTime);
@@ -258,6 +285,13 @@ public class AlertAnalysisService {
                    (1) evidence most relevant to THIS alert's metric signature;
                    (2) competing signals observed and why they belong to a different
                    fault mode; (3) final conclusion.
+                10. EVIDENCE CITATION BY INDEX (MANDATORY): The EVIDENCE INDEX section
+                   lists the REAL queries that were actually executed, each numbered
+                   [E1], [E2], ... . Whenever you reference evidence in root_cause_hypothesis
+                   or analysis_detail, cite its number as [E{n}] next to the quoted
+                   metric value or log line. NEVER invent index numbers, queries, or
+                   URLs — only the [E{n}] entries from the EVIDENCE INDEX can be resolved.
+                   Invented citations make your analysis untrustworthy.
 
                 Output format (JSON only, no markdown):
                 {
@@ -275,7 +309,8 @@ public class AlertAnalysisService {
     /**
      * 构建 User Prompt - 填入告警信息和收集到的上下文
      */
-    private String buildUserPrompt(Incident incident, String metrics, String logs, String runbooks) {
+    private String buildUserPrompt(Incident incident, String metrics, String logs, String runbooks,
+                                   String evidenceIndexPrompt) {
         return """
                 === ALERT INFORMATION ===
                 Alert Name: %s
@@ -294,12 +329,18 @@ public class AlertAnalysisService {
                 === MATCHED RUNBOOKS (from knowledge base) ===
                 %s
 
+                === EVIDENCE INDEX (real queries executed by the tools; cite ONLY by number) ===
+                %s
+
                 === YOUR TASK ===
                 Analyze this alert and provide a structured root cause analysis in JSON format.
                 MANDATORY: quote at least one exact metric value (format: [metric: <name> = <value>])
                 and at least one exact log line (format: [log: "<exact line>"]) inside
                 root_cause_hypothesis or analysis_detail. Analysis without any quoted metric
                 or log evidence will be treated as weak evidence (confidence <= 0.4).
+                MANDATORY: every evidence reference must cite its EVIDENCE INDEX number as [E{n}]
+                next to the quoted value/log line. NEVER invent index numbers — only [E{n}]
+                from the EVIDENCE INDEX exist, and invented ones cannot be resolved.
                 If the logs show errors or exceptions, quote them and explain their significance.
                 """.formatted(
                 incident.getAlertname(),
@@ -310,14 +351,15 @@ public class AlertAnalysisService {
                 incident.getReceivedAt().toString(),
                 metrics,
                 logs,
-                runbooks
+                runbooks,
+                evidenceIndexPrompt
         );
     }
 
     /**
      * 解析 LLM 的 JSON 输出并保存到 Incident
      */
-    private void parseAndSaveAnalysis(Incident incident, String llmOutput) {
+    private void parseAndSaveAnalysis(Incident incident, String llmOutput, List<Evidence> evidenceList) {
         try {
             // 清理可能的 markdown 代码块标记
             String cleanJson = llmOutput.trim();
@@ -347,6 +389,9 @@ public class AlertAnalysisService {
             incident.setCompetingSignals(json.path("competing_signals_observed").toString());
             incident.setEvidenceAlignment(json.path("evidence_alignment").asText(""));
 
+            // v9 证据链可执行化：LLM 引用的 [E{n}] → 后端映射为真实查询 + 深链 URL
+            incident.setEvidenceCitations(buildEvidenceCitationsJson(llmOutput, evidenceList));
+
             log.info("Parsed analysis: confidence={}, rootCause={}",
                     incident.getConfidence(), incident.getRootCauseHypothesis());
 
@@ -356,6 +401,93 @@ public class AlertAnalysisService {
             incident.setRootCauseHypothesis("Failed to parse structured output - see analysis_detail");
             incident.setAnalysisDetail(llmOutput);
             incident.setConfidence(0.3);
+        }
+    }
+
+    /**
+     * 把 EVIDENCE INDEX 渲染进 prompt（v9）。
+     * 每一行：编号 + 来源 + 真实查询 + 摘要 + 时间窗。LLM 只能引用这些编号。
+     */
+    private String buildEvidenceIndexPrompt(List<Evidence> evidenceList) {
+        if (evidenceList.isEmpty()) {
+            return "(no evidence registered)";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Evidence e : evidenceList) {
+            sb.append("[E").append(e.index()).append("] ")
+                    .append(e.source())
+                    .append(" | query: ").append(e.query())
+                    .append(" | summary: ").append(e.summary())
+                    .append(" | window: ").append(e.window())
+                    .append("\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 把 LLM 输出中引用的 [E{n}] 编号映射为可执行 citation（v9 核心）。
+     * <p>
+     * 关键安全设计：query 和 url 只来自后端的 evidenceList（工具真实执行的查询），
+     * LLM 引用不存在的编号 → resolved=false 且不含任何 query/url——LLM 无法伪造证据。
+     */
+    private String buildEvidenceCitationsJson(String llmOutput, List<Evidence> evidenceList) {
+        try {
+            Set<Integer> cited = new LinkedHashSet<>();
+            Matcher m = Pattern.compile("\\[E(\\d+)]").matcher(llmOutput == null ? "" : llmOutput);
+            while (m.find()) {
+                try {
+                    cited.add(Integer.parseInt(m.group(1)));
+                } catch (NumberFormatException ignored) {
+                    // 非数字编号（如 [Error]），忽略
+                }
+            }
+
+            Map<Integer, Evidence> byIndex = new LinkedHashMap<>();
+            for (Evidence e : evidenceList) {
+                byIndex.put(e.index(), e);
+            }
+
+            List<Map<String, Object>> citations = new ArrayList<>();
+            for (Integer i : cited) {
+                Evidence e = byIndex.get(i);
+                Map<String, Object> c = new LinkedHashMap<>();
+                c.put("index", i);
+                if (e != null) {
+                    c.put("source", e.source());
+                    c.put("query", e.query());
+                    c.put("summary", e.summary());
+                    c.put("window", e.window());
+                    if (e.url() != null) {
+                        c.put("url", e.url());
+                    }
+                    c.put("resolved", true);
+                } else {
+                    c.put("resolved", false); // 伪造/不存在的编号：不可解析，无 query/url
+                }
+                citations.add(c);
+            }
+            return objectMapper.writeValueAsString(citations);
+        } catch (Exception e) {
+            log.warn("Failed to build evidence citations: {}", e.getMessage());
+            return "[]";
+        }
+    }
+
+    /**
+     * 生成 Grafana Explore 深链 URL（后端拼装，LLM 不参与）。
+     * 点击即可在 Grafana 中复现该证据查询——"证据链可执行化"的可视化落点。
+     */
+    private String buildGrafanaExploreUrl(String datasource, String expr) {
+        try {
+            String pane = "{\"pane1\":{\"datasource\":\"" + datasource
+                    + "\",\"queries\":[{\"refId\":\"A\",\"expr\":"
+                    + objectMapper.writeValueAsString(expr)
+                    + "}],\"range\":{\"from\":\"now-30m\",\"to\":\"now\"}}}";
+            return "http://localhost:3000/explore?schemaVersion=1&panes="
+                    + URLEncoder.encode(pane, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("Failed to build Grafana explore URL: {}", e.getMessage());
+            return null;
         }
     }
 

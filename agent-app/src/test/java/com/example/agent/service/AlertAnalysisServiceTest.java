@@ -1,5 +1,6 @@
 package com.example.agent.service;
 
+import com.example.agent.evidence.QueryRecord;
 import com.example.agent.model.Incident;
 import com.example.agent.rag.RunbookRetrievalService;
 import com.example.agent.repository.IncidentRepository;
@@ -15,7 +16,9 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -359,5 +362,99 @@ class AlertAnalysisServiceTest {
         assertThat(result.getRelatedLogs()).endsWith("[truncated]");
         assertThat(result.getRelatedLogs()).hasSize(2015); // 2000 + "... [truncated]"（15字符）
         assertThat(result.getStatus()).isEqualTo(Incident.AnalysisStatus.COMPLETED);
+    }
+
+    @Test
+    void llmCitationByIndex_shouldResolveToExecutableEvidence() {
+        // ============================================================
+        // 1. 准备（v9 证据链可执行化）：工具记录了真实执行的查询，
+        //    LLM 输出中引用 [E1]（Prometheus）和 [E2]（Loki）
+        // ============================================================
+        mockToolsReturn(
+                "http_server_requests_seconds_count 12345",
+                "ERROR java.lang.RuntimeException at OrdersController",
+                "## High Error Rate Runbook\n1. Check DB connection pool"
+        );
+        QueryRecord promRecord = new QueryRecord(
+                "PROMETHEUS",
+                "rate(http_server_requests_seconds_count{job='demo-app'}[5m])",
+                "1 series", null, null);
+        QueryRecord lokiRecord = new QueryRecord(
+                "LOKI",
+                "{service=\"demo-app\"} |= `ERROR` != `RuntimeException`",
+                "3 matching log lines",
+                Instant.now().minus(2, java.time.temporal.ChronoUnit.MINUTES), Instant.now());
+        when(prometheusTool.getLastQueryRecords()).thenReturn(List.of(promRecord));
+        when(lokiTool.getLastQueryRecord()).thenReturn(lokiRecord);
+
+        mockChatClientSuccess("""
+                {
+                  "root_cause_hypothesis": "Error rate spiked [E1] while logs show DB timeouts [E2]",
+                  "analysis_detail": "Metric [E1] confirms 5xx spike; logs [E2] show connection timeout",
+                  "suggested_actions": ["Restart pool"],
+                  "confidence": 0.85,
+                  "evidence_strength": "strong"
+                }
+                """);
+        when(repository.save(any(Incident.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // ============================================================
+        // 2. 执行
+        // ============================================================
+        Incident result = alertAnalysisService.createAndAnalyze(buildIncident());
+
+        // ============================================================
+        // 3. 断言：编号被后端映射成真实查询 + 可点击深链（resolved=true）
+        // ============================================================
+        assertThat(result.getEvidenceCitations()).contains("\"index\":1");
+        assertThat(result.getEvidenceCitations()).contains("\"index\":2");
+        assertThat(result.getEvidenceCitations()).contains("rate(http_server_requests_seconds_count");
+        assertThat(result.getEvidenceCitations()).contains("{service=\\\"demo-app\\\"} |= `ERROR`");
+        assertThat(result.getEvidenceCitations()).contains("explore");
+        assertThat(result.getEvidenceCitations()).contains("\"resolved\":true");
+        // LLM 没有生成 query——query 来自后端记录（防伪造的核心断言）
+        assertThat(result.getEvidenceCitations()).contains("1 series");
+        assertThat(result.getEvidenceCitations()).contains("3 matching log lines");
+        assertThat(result.getStatus()).isEqualTo(Incident.AnalysisStatus.COMPLETED);
+    }
+
+    @Test
+    void llmFabricatedCitationIndex_shouldNotResolveToAnyQuery() {
+        // ============================================================
+        // 1. 准备：LLM 引用了一个 EVIDENCE INDEX 中不存在的编号 [E99]
+        //    （真实场景：模型幻觉，编造证据编号）
+        // ============================================================
+        mockToolsReturn(
+                "http_server_requests_seconds_count 12345",
+                "ERROR java.lang.RuntimeException at OrdersController",
+                "## High Error Rate Runbook\n1. Check DB connection pool"
+        );
+        when(prometheusTool.getLastQueryRecords()).thenReturn(List.of());
+        when(lokiTool.getLastQueryRecord()).thenReturn(null);
+
+        mockChatClientSuccess("""
+                {
+                  "root_cause_hypothesis": "Memory leak detected per [E99]",
+                  "analysis_detail": "JVM heap grew according to [E99]",
+                  "suggested_actions": ["Fix"],
+                  "confidence": 0.9,
+                  "evidence_strength": "strong"
+                }
+                """);
+        when(repository.save(any(Incident.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // ============================================================
+        // 2. 执行
+        // ============================================================
+        Incident result = alertAnalysisService.createAndAnalyze(buildIncident());
+
+        // ============================================================
+        // 3. 断言：伪造编号 resolved=false，且不产生任何 query/url
+        //    （v9 安全设计：LLM 无法注入假证据——query/url 只能来自后端）
+        // ============================================================
+        assertThat(result.getEvidenceCitations()).contains("\"index\":99");
+        assertThat(result.getEvidenceCitations()).contains("\"resolved\":false");
+        assertThat(result.getEvidenceCitations()).doesNotContain("\"query\"");
+        assertThat(result.getEvidenceCitations()).doesNotContain("explore");
     }
 }

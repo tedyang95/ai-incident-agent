@@ -1,0 +1,10 @@
+time,fault,incident_id,alertname,status,confidence,prompt_tokens,completion_tokens,duration_ms,root_cause
+12:18:07,error,97|HighErrorRate|COMPLETED|0.9|6724|337|4279|Thehigherrorrateislikelycausedbyasimulateddatabaseconnectiontimeout,resultinginasignificantnumberofRuntimeExceptions.
+12:21:16,latency,99|HighLatency|COMPLETED|0.9|4825|261|3185|Thehighp99latencyislikelycausedbyafaultinjectionthatintroducesadelayof2-5secondsforallrequests.
+12:26:48,memory,101|HighMemoryUsage|COMPLETED|0.8|4647|348|4004|ThehighJVMheapmemoryusageislikelyduetoamemoryleakorexcessivememoryconsumption,asindicatedbytheJVMheapusagemetricshowing98.67%utilization[metric:jvm_memory_used_bytes=0.9867130824497767]andtheabsenceofrelevanterrorlogs[log:"Nologsfoundforservice='demo-app',keyword='ERROR'incorrelationwindow."]
+12:29:17,error+latency,104|HighErrorRate|COMPLETED|0.9|6938|326|4150|Thehigherrorrateislikelycausedbyasimulateddatabaseconnectiontimeout,resultinginRuntimeExceptionsduringordercreation.
+12:29:17,error+latency,103|HighLatency|COMPLETED|0.9|5001|311|3875|Thehighp99latencyislikelycausedbyafaultinjectionthatintroducesadelayof2-5secondsforallrequests.
+12:34:51,latency+memory,107|HighLatency|COMPLETED|0.9|4835|271|3018|Thehighp99latencyislikelycausedbyafaultinjectionthatintroducesadelayof2-5secondsforallrequests.
+12:34:51,latency+memory,108|HighMemoryUsage|COMPLETED|0.8|4684|378|3917|ThehighJVMheapmemoryusageislikelyduetoamemoryleakorexcessivememoryconsumption,asindicatedbytheJVMheapusagemetricshowingavalueof0.9867653593725088,whichisabovethe85%thresholdformorethan2minutes.
+12:40:04,error+memory,112|HighErrorRate|COMPLETED|0.9|6760|292|4175|Thehigherrorrateislikelycausedbyasimulateddatabaseconnectiontimeout,leadingtoRuntimeExceptionsintheapplication.
+12:40:04,error+memory,113|HighMemoryUsage|COMPLETED|0.8|4676|364|4007|ThehighJVMheapmemoryusageislikelyduetoamemoryleakorexcessivememoryconsumption,asindicatedbytheJVMheapusagemetricshowing98.67%usage[metric:jvm_memory_used_bytes=0.9867447210817921]andtheabsenceofrelevanterrorlogs[log:"Nologsfoundforservice='demo-app',keyword='ERROR'incorrelationwindow."]

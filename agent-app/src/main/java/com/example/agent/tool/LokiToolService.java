@@ -1,5 +1,6 @@
 package com.example.agent.tool;
 
+import com.example.agent.evidence.QueryRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,6 +29,17 @@ public class LokiToolService {
     private String lokiUrl;
 
     private final RestTemplate restTemplate = new RestTemplate();
+
+    /**
+     * 最近一次成功执行的查询记录（v9 证据链可执行化）。
+     * AlertAnalysisService 调用工具后读取，用于构建 EVIDENCE INDEX。
+     * 注意：分析流程为同步单线程，实例字段足够；如改多线程需改为 ThreadLocal。
+     */
+    private volatile QueryRecord lastQueryRecord;
+
+    public QueryRecord getLastQueryRecord() {
+        return lastQueryRecord;
+    }
 
     /**
      * 搜索日志，返回匹配的日志行
@@ -92,6 +104,9 @@ public class LokiToolService {
 
             sb.append("\n(Total: ").append(count).append(" log lines)\n");
             log.debug("Loki search for '{}' in '{}' found {} lines", keyword, service, count);
+            this.lastQueryRecord = new QueryRecord(
+                    "LOKI", logql, count + " matching log lines",
+                    Instant.now().minus(minutes, ChronoUnit.MINUTES), Instant.now());
             return sb.toString();
 
         } catch (Exception e) {
@@ -173,6 +188,8 @@ public class LokiToolService {
 
             sb.append("\n(Total: ").append(count).append(" log lines)\n");
             log.debug("Loki window search for '{}' in '{}' found {} lines", keyword, service, count);
+            this.lastQueryRecord = new QueryRecord(
+                    "LOKI", logql.toString(), count + " matching log lines", from, to);
             return sb.toString();
 
         } catch (Exception e) {

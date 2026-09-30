@@ -1,8 +1,8 @@
-# AI Incident Triage Agent — Tuning Log（v1 → v7b）
+# AI Incident Triage Agent — Tuning Log（v1 → v9）
 
 > 本页记录这个 AI 系统如何被逐步调"准"：每轮改了什么、观测到什么、为什么那样改。
 > 配套脚本：`docs/eval/run_baseline.sh`（评估）、`docs/eval/check_grounding.py`（引用真实性校验）
-> 数据：`docs/eval/baseline_results_{v1..v7b}.csv`、PostgreSQL `incidents` 表（可回查每条原始分析）
+> 数据：`docs/eval/baseline_results_{v1..v9}.csv`、PostgreSQL `incidents` 表（可回查每条原始分析）
 
 ---
 
@@ -88,19 +88,32 @@
 - **新发现**：#94（error+memory 复合中 HighMemoryUsage）根因正确但 confidence **0.4**（只有 metric 证据、无 ERROR 日志 → 按规则弱校准）。与上一轮同场景 0.7 存在波动——**正确降置信是校准正确的表现，但置信度稳定性待观察**（LLM 输出波动 + 新规则更保守）
 - **教训**：**判别力 = 检索隔离（上游，别把脏证据喂进来）+ 指标签名核对（下游，让模型会识别）**；修好上游后，下游的兜底指令几乎不需要触发（#85 未观察到竞争信号）
 
+### v9 — 证据链可执行化（citation index + 后端映射，LLM 不生成 query）
+- **背景**：v8 判别力达成后，"工程可信度"还剩最后一个缺口——**LLM 输出的证据引用是"文本"（`[metric: ...]` / `[log: "..."]`），不是"动作"**。分析结论引用了哪个查询？怎么点开复现、核验？这些没有结构化答案。而如果让 LLM 自己生成查询链接，它可能编造（hallucinate）。
+- **改动（治本）**：**让 LLM 引用"证据的编号"，而不是生成"证据的内容"**——
+  - 工具层：`LokiToolService` / `PrometheusToolService` 在每次**真实查询成功后记录 QueryRecord**（PromQL/LogQL + 命中数 + 时间窗）——后端是查询的 **single source of truth**
+  - 编排层：`AlertAnalysisService` 把真实查询构建成 **EVIDENCE INDEX**（`[E1]`..`[En]` 编号 + 真实查询 + 摘要），随 prompt 喂给 LLM
+  - prompt 层：system 规则 10 —— 引用必须带 `[E{n}]` 编号；**禁止发明编号、查询、URL**（只有 index 里的可解析）
+  - 解析层：提取 LLM 输出中的 `[E{n}]` → 后端映射 → `evidenceCitations` JSON（真实 query + **Grafana explore 深链 URL** + resolved 标志），持久化到 Incident
+- **防伪设计**：LLM 引用 index 里不存在的编号 → `resolved=false`，**不产生任何 query/url**——模型永远无法注入假证据（可信度由后端结构保证，不依赖模型诚实）
+- **结果**：全量回归 **9/9 命中（error 0.9×4 / latency 0.9×3 / memory 0.8×2，与 v8 完全持平，无退化）**；grounding 保持 100%；集成验证（incident #96）：LLM 引用 `[E3]` → 后端映射 `rate(http_server_requests_seconds_count{job='demo-app',status=~'5..'}[5m])` + Grafana explore 深链
+- **新增测试 2 个（共 7/7）**：①编号解析映射成功（resolved=true，query/url 来自后端）②伪造编号防御（`[E99]` → resolved=false 且无任何 query）
+- **教训**：*"trust the index, not the model's memory"* —— 证据可信度应该靠**架构保证**（编号→真实查询的映射在后端），而不是靠**提示词约束**（让模型自觉诚实）。引用是选择（selection），生成是创作（generation）——让模型做前者，让后端做后者
+
 ---
 
 ## 3. 量化总结（Summary）
 
 | 指标 | 起始 | 最终 |
 |---|---|---|
-| 故障命中率 | 2/3（v1） | **9/9（v8：单故障 3/3 + 复合 3/3）** |
-| 引用真实性（grounding） | 0%（v2 全是编造） | **100%（v8：metric 8/8 + log 8/8 逐字）** |
+| 故障命中率 | 2/3（v1） | **9/9（v8→v9 保持：单故障 3/3 + 复合 3/3）** |
+| 引用真实性（grounding） | 0%（v2 全是编造） | **100%（v9 回归保持：metric 7/7 + log 7/7 逐字）** |
 | latency 诊断置信度 | 0.5（无证据） | **0.9**（alert-aware 检索 + 复合判别） |
 | error 诊断置信度 | 0.7 | **0.9**（correlation window 后） |
 | memory 诊断置信度 | 0.7 | **0.8**（单故障；复合下无日志证据时正确降置信 0.4） |
 | 复合判别力（discrimination） | 第一轮 2/3（HighLatency 被污染错判） | **3/3**（检索层排除后翻正） |
 | Loki 日志链路 | HTTP 400（第一天就坏） | **HTTP 200，streams 0→1** |
+| 证据可执行化（v9） | 引用是文本，无法复现 | **LLM 引用编号 → 后端映射真实查询 + Grafana 深链**（伪造编号 → resolved=false） |
 
 ---
 
@@ -117,6 +130,9 @@
 
 ### 方法论的形成（eval-driven）
 > *"I treat evaluation like a grading rubric — fixed fault injections with known answers (measure, not train), settle isolation between cases, one variable at a time, and a grounding check that verifies evidence provenance, not just format."*
+
+### 证据可信度的架构保证（executable citations）
+> *"The last trust gap wasn't diagnosis accuracy — it was that my agent's citations were text, not actions. I made evidence executable: tools record every query they really ran, the prompt exposes an evidence index of real queries, and the model cites by number. The backend resolves each number to the actual query and a Grafana deep link; an invented index resolves to nothing. Citations became auditable by construction, not by model compliance."*
 
 ---
 

@@ -1,11 +1,13 @@
 package com.example.agent.tool;
 
+import com.example.agent.evidence.QueryRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +28,17 @@ public class PrometheusToolService {
     private String prometheusUrl;
 
     private final RestTemplate restTemplate = new RestTemplate();
+
+    /**
+     * 本分析流程中成功执行过的全部查询记录（v9 证据链可执行化）。
+     * getServiceOverview() 会执行多条 PromQL，全部记录；用 volatile 引用替换保证并发安全。
+     * AlertAnalysisService 调用工具后读取，用于构建 EVIDENCE INDEX。
+     */
+    private volatile List<QueryRecord> lastQueryRecords = new ArrayList<>();
+
+    public List<QueryRecord> getLastQueryRecords() {
+        return lastQueryRecords;
+    }
 
     /**
      * 执行 PromQL 查询，返回指标当前值
@@ -73,6 +86,9 @@ public class PrometheusToolService {
             }
 
             log.debug("Prometheus query '{}' returned {} results", query, results.size());
+            List<QueryRecord> records = new ArrayList<>(lastQueryRecords);
+            records.add(new QueryRecord("PROMETHEUS", query, results.size() + " series", null, null));
+            lastQueryRecords = records;
             return sb.toString();
 
         } catch (Exception e) {
@@ -86,6 +102,8 @@ public class PrometheusToolService {
      * 用于告警分析时自动收集上下文
      */
     public String getServiceOverview(String service) {
+        // 每次 overview 开始重置查询记录（保证 EVIDENCE INDEX 只包含本次分析的真实查询）
+        lastQueryRecords = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
         sb.append("=== Service Overview: ").append(service).append(" ===\n\n");
 
