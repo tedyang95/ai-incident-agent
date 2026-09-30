@@ -52,8 +52,32 @@
   }
   .metric-chip b { display: block; font-size: 18px; color: var(--text); }
 
+  /* ============ PLAY HINT (game-style entry) ============ */
+  .play-hint { text-align: center; margin: 40px 0 22px; }
+  .click-one {
+    display: inline-block; font-size: 21px; font-weight: 900; letter-spacing: 5px;
+    color: #0b0e14; background: linear-gradient(90deg, var(--accent), var(--accent2));
+    padding: 11px 30px; border-radius: 999px;
+    box-shadow: 0 0 26px rgba(76,194,255,.45);
+    animation: pulseGlow 1.6s ease-in-out infinite;
+    text-transform: uppercase;
+  }
+  @keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 26px rgba(76,194,255,.45); }
+    50% { box-shadow: 0 0 42px rgba(124,92,255,.65); }
+  }
+  .play-arrow {
+    font-size: 30px; line-height: 1; color: var(--accent); margin-top: 10px;
+    animation: bounce 1.1s ease-in-out infinite; display: block;
+  }
+  @keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(7px); }
+  }
+  .play-sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+
   /* ============ FAULT BUTTONS ============ */
-  .faults { margin-top: 34px; }
+  .faults { margin-top: 6px; }
   .faults-title { font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); text-align: center; margin-bottom: 14px; font-weight: 700; }
   .fault-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   .fault-btn {
@@ -178,7 +202,17 @@
   .how-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; text-align: center; }
   .how-card .n { font-size: 12px; font-weight: 800; color: var(--accent); letter-spacing: 1px; }
   .how-card h3 { font-size: 15px; margin-top: 8px; }
-  .how-card p { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .spec { margin-top: 14px; text-align: left; }
+  .spec-row {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-size: 12.5px; padding: 7px 0; border-bottom: 1px dashed rgba(139,152,173,.2);
+  }
+  .spec-row:last-child { border-bottom: none; }
+  .spec-k { color: var(--muted); flex-shrink: 0; }
+  .spec-v {
+    color: var(--text); font-weight: 600; text-align: right;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  }
 
   /* ============ FOOTER ============ */
   .footer { text-align: center; margin-top: 50px; padding-top: 26px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
@@ -211,13 +245,19 @@
       <div class="metric-chip"><b>9/9</b>fault scenarios diagnosed</div>
       <div class="metric-chip"><b>100%</b>evidence grounded — zero fabrication</div>
       <div class="metric-chip"><b>7/7</b>unit tests green</div>
-      <div class="metric-chip"><b>gpt-4o-mini</b>under the hood</div>
+      <div class="metric-chip"><b>gpt-4o-mini</b>AI Model</div>
     </div>
+  </div>
+
+  <!-- ================= PLAY HINT ================= -->
+  <div class="play-hint">
+    <div class="click-one">CLICK ONE</div>
+    <div class="play-arrow">▼</div>
+    <div class="play-sub">and let the AI do the rest</div>
   </div>
 
   <!-- ================= FAULT BUTTONS ================= -->
   <div class="faults">
-    <div class="faults-title">⬇ &nbsp;Something broke. Click a fault — watch the AI investigate</div>
     <div class="fault-grid">
       <button class="fault-btn" data-scenario="error">
         <span class="icon">🔥</span>
@@ -257,17 +297,29 @@
       <div class="how-card">
         <div class="n">STEP 1</div>
         <h3>An alert arrives</h3>
-        <p>Prometheus fires a monitoring alert and hands it to the agent — no human paging, no waiting.</p>
+        <div class="spec">
+          <div class="spec-row"><span class="spec-k">Provider</span><span class="spec-v">Prometheus</span></div>
+          <div class="spec-row"><span class="spec-k">Router</span><span class="spec-v">Alertmanager</span></div>
+          <div class="spec-row"><span class="spec-k">Delivery</span><span class="spec-v">webhook → agent</span></div>
+        </div>
       </div>
       <div class="how-card">
         <div class="n">STEP 2</div>
         <h3>The agent investigates</h3>
-        <p>It queries live metrics and logs like a detective gathering clues, and pulls the matching runbook from its knowledge base.</p>
+        <div class="spec">
+          <div class="spec-row"><span class="spec-k">Metrics</span><span class="spec-v">Prometheus</span></div>
+          <div class="spec-row"><span class="spec-k">Logs</span><span class="spec-v">Loki (tool call)</span></div>
+          <div class="spec-row"><span class="spec-k">Knowledge</span><span class="spec-v">runbooks (RAG)</span></div>
+        </div>
       </div>
       <div class="how-card">
         <div class="n">STEP 3</div>
         <h3>A verdict, with proof</h3>
-        <p>It says what broke, how confident it is, and how to fix it — and every claim links to the exact query that produced it.</p>
+        <div class="spec">
+          <div class="spec-row"><span class="spec-k">Output</span><span class="spec-v">root cause + actions</span></div>
+          <div class="spec-row"><span class="spec-k">Confidence</span><span class="spec-v">0.8–0.9, calibrated</span></div>
+          <div class="spec-row"><span class="spec-k">Evidence</span><span class="spec-v">real queries + links</span></div>
+        </div>
       </div>
     </div>
   </div>
