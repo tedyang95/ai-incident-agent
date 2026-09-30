@@ -12,8 +12,9 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 
 | Signal | Data |
 |---|---|
-| 🎯 **Fault diagnosis** | **3/3** scenarios correctly diagnosed (error / latency / memory) |
+| 🎯 **Fault diagnosis** | **9/9** scenarios correctly diagnosed — 3 single (error / latency / memory) + 3 composite (multi-alert) |
 | 🔍 **Evidence grounding** | **100%** of `[metric:]` / `[log:]` citations verified verbatim against retrieved context |
+| 🎯 **Composite discrimination** | **9/9** across concurrent-fault cases; HighLatency 0.8 wrong call → **0.9** correct after retrieval isolation |
 | 📈 **Tuning impact** | latency diagnosis confidence **0.5 → 0.9** after fixing a one-character LogQL bug + alert-aware retrieval |
 | 🏭 **Real stack** | Prometheus → Alertmanager → AI Agent → Loki → Grafana → PostgreSQL, all in Docker Compose |
 
@@ -36,9 +37,9 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 
 **Agent pipeline (LLM workflow):**
 1. **Collect context** — Prometheus metrics (tool call) + Loki logs (tool call, correlation window anchored to alert time) + Runbook RAG retrieval
-2. **Build prompt** — structured context + strict citation rules
-3. **Call LLM** — GPT-4o-mini returns structured JSON: root cause, confidence, evidence citations, suggested actions
-4. **Persist** — incident + full context snapshot saved to PostgreSQL (auditable, reproducible)
+2. **Build prompt** — structured context + strict citation rules + an evidence index of the *real* queries executed
+3. **Call LLM** — GPT-4o-mini returns structured JSON: root cause, confidence, numbered evidence citations, suggested actions
+4. **Persist** — incident + full context snapshot + executable evidence citations (query → clickable Grafana link) saved to PostgreSQL
 5. **Expose** — REST API for querying incidents and stats
 
 **AI capability levels addressed** (per the "Six Levels of AI Products" framework):
@@ -49,7 +50,7 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 
 ---
 
-## 🔬 The tuning story (v1 → v7b)
+## 🔬 The tuning story (v1 → v8)
 
 | Run | Change | Result | Lesson |
 |---|---|---|---|
@@ -58,6 +59,7 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 | v5 | **fixed LogQL single-quote bug** | 3/3, citations became 100% real | one character can break your whole evidence chain |
 | v6 | **correlation-window retrieval** | error 0.9, cross-contamination gone | query the alert's time window, not "now" |
 | v7b | **alert-aware keyword search** | latency 0.5 → 0.9 | tool signatures should adapt to the task |
+| v8 | **retrieval isolation + discrimination rules** | **9/9, 100% grounding, HighLatency 0.8 → 0.9** | feed clean evidence, then teach the model to discriminate |
 
 Full experiment log with data: **[docs/TUNING.md](docs/TUNING.md)**
 
@@ -124,6 +126,69 @@ curl http://localhost:8081/api/incidents/1
 ```bash
 curl -X POST http://localhost:8080/api/admin/fail/stop
 ```
+
+---
+
+## 🔌 Plug into your stack — 3 steps, zero code changes
+
+> The agent doesn't replace your observability stack. It sits **next to it** — read-only — and reads what your services already emit: Prometheus metrics and Loki logs.
+
+**Your service code? Untouched.** No SDK, no agent library, no reconfiguration of your app. If your service already exports Prometheus metrics and ships logs to Loki (standard in any modern stack), integration is 3 steps:
+
+```
+[Your service (e.g. price-service)]      ← zero code changes
+   │  already emits: metrics + logs
+   ▼
+[Your Prometheus] ──alert──▶ [Your Alertmanager] ──1-line webhook──▶ [AI Agent]
+                                                                       │  read-only
+[Your Loki] ◀──────────────────────────────────────────────────────────┘  tool calls
+```
+
+### Step 1 — Point your alerts at the agent
+
+Add one receiver + route to your existing `alertmanager.yml`:
+
+```yaml
+route:
+  receiver: ai-agent
+receivers:
+  - name: ai-agent
+    webhook_configs:
+      - url: http://agent-host:8081/api/alert/webhook   # where you run the agent
+```
+
+That's it. Every new alert now flows into the agent automatically.
+
+### Step 2 — Tell the agent where your Prometheus & Loki live
+
+Set two environment variables (plus your LLM key) where the agent runs:
+
+```bash
+PROMETHEUS_URL=http://your-prometheus:9090
+LOKI_URL=http://your-loki:3100
+OPENAI_API_KEY=sk-...
+```
+
+The agent only ever **reads** from them — it never writes to your metrics or logs.
+
+### Step 3 — Done. Every alert gets triaged automatically
+
+Each alert becomes a structured incident with:
+- **Root-cause hypothesis + confidence score** (grounded in quoted metrics & logs)
+- **Executable evidence citations** — every claim links back to the exact PromQL/LogQL that produced it, clickable straight into Grafana
+- **Suggested remediation actions** + matched runbooks (RAG)
+- **Full context snapshot** — everything the LLM saw, persisted for audit
+
+Results are queryable via the [Agent API](#agent-api) and stored in PostgreSQL:
+
+| What the agent does | What stays yours |
+|---|---|
+| Reads alerts from your Alertmanager | Your service code, configs, deployments |
+| Reads metrics + logs (read-only) | Your Prometheus, Loki, Grafana ownership |
+| Writes incidents to its own PostgreSQL | Your data stays in your systems |
+| Exposes REST API for triage results | Your existing on-call / notification flow |
+
+> Running the full stack? `docker compose up -d` brings up the agent + a complete demo environment (demo-app, Prometheus, Alertmanager, Loki, Grafana, PostgreSQL) so you can see the whole pipeline before wiring in your own services.
 
 ---
 
