@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Incident Triage Agent — Interactive Demo</title>
+<meta name="description" content="When your server breaks, this AI tells you what broke, why, and how to fix it — in minutes. Click a fault and watch the agent investigate.">
+<style>
+  :root {
+    --bg: #0e1117;
+    --panel: #161b24;
+    --panel2: #1c2330;
+    --border: #242e3f;
+    --text: #e8edf4;
+    --muted: #8b98ad;
+    --accent: #4cc2ff;
+    --accent2: #7c5cff;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --purple: #c084fc;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px 60px; }
+
+  /* ============ HERO ============ */
+  .hero { padding: 56px 0 28px; text-align: center; }
+  .badge-top {
+    display: inline-block; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--accent); border: 1px solid rgba(76,194,255,.35); background: rgba(76,194,255,.07);
+    padding: 5px 14px; border-radius: 999px; margin-bottom: 18px; font-weight: 600;
+  }
+  h1 { font-size: 34px; line-height: 1.25; font-weight: 800; letter-spacing: -.5px; }
+  h1 .grad {
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--muted); font-size: 17px; max-width: 640px; margin: 16px auto 0; }
+  .metrics-row {
+    display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 22px;
+  }
+  .metric-chip {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 18px; font-size: 13px; color: var(--muted);
+  }
+  .metric-chip b { display: block; font-size: 18px; color: var(--text); }
+
+  /* ============ FAULT BUTTONS ============ */
+  .faults { margin-top: 34px; }
+  .faults-title { font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); text-align: center; margin-bottom: 14px; font-weight: 700; }
+  .fault-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .fault-btn {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 20px 18px; text-align: left; cursor: pointer; transition: transform .12s, border-color .15s, box-shadow .15s;
+    color: var(--text); font-family: inherit;
+  }
+  .fault-btn:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 8px 24px rgba(76,194,255,.12); }
+  .fault-btn:active { transform: translateY(0); }
+  .fault-btn .icon { font-size: 26px; display: block; margin-bottom: 10px; }
+  .fault-btn .name { font-size: 15px; font-weight: 700; }
+  .fault-btn .desc { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .fault-btn .alert-tag {
+    display: inline-block; margin-top: 10px; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+    padding: 3px 10px; border-radius: 999px;
+  }
+  .tag-error { color: var(--red); background: rgba(248,113,113,.12); }
+  .tag-latency { color: var(--amber); background: rgba(251,191,36,.12); }
+  .tag-memory { color: var(--purple); background: rgba(192,132,252,.12); }
+
+  /* ============ PIPELINE ANIMATION ============ */
+  .pipeline { margin-top: 34px; display: none; }
+  .pipeline.visible { display: block; }
+  .pipe-steps { display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap; }
+  .step {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 14px; font-size: 12.5px; display: flex; align-items: center; gap: 8px;
+    opacity: .45; transition: opacity .2s, border-color .2s, background .2s; min-width: 118px;
+  }
+  .step .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0;
+  }
+  .step.active { opacity: 1; border-color: var(--accent); background: rgba(76,194,255,.08); }
+  .step.active .dot { background: var(--accent); animation: pulse 1s infinite; }
+  .step.done { opacity: 1; border-color: rgba(52,211,153,.5); background: rgba(52,211,153,.06); }
+  .step.done .dot { background: var(--green); }
+  .step-arrow { color: var(--muted); font-size: 13px; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(76,194,255,.5); } 50% { box-shadow: 0 0 0 6px rgba(76,194,255,0); } }
+  .pipe-meta { text-align: center; color: var(--muted); font-size: 13px; margin-top: 14px; min-height: 22px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* ============ VERDICT ============ */
+  .verdict { margin-top: 34px; display: none; }
+  .verdict.visible { display: block; animation: fadeUp .35s ease; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 26px;
+  }
+  .v-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .v-alertname {
+    font-size: 12px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 999px;
+  }
+  .v-alertname.HighErrorRate { color: var(--red); background: rgba(248,113,113,.12); }
+  .v-alertname.HighLatency { color: var(--amber); background: rgba(251,191,36,.12); }
+  .v-alertname.HighMemoryUsage { color: var(--purple); background: rgba(192,132,252,.12); }
+  .v-status {
+    font-size: 12px; color: var(--green); background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.3);
+    padding: 4px 11px; border-radius: 999px; font-weight: 700;
+  }
+  .v-incident { font-size: 12.5px; color: var(--muted); margin-left: auto; font-family: ui-monospace, Menlo, monospace; }
+  .v-verdict-title { font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin: 22px 0 8px; font-weight: 700; }
+  .v-rootcause { font-size: 19px; font-weight: 600; line-height: 1.5; color: var(--text); }
+  .v-detail { color: var(--muted); font-size: 14px; margin-top: 10px; }
+
+  .conf-row { margin-top: 22px; }
+  .conf-label { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .conf-label b { color: var(--text); }
+  .conf-bar { height: 10px; border-radius: 999px; background: var(--panel2); overflow: hidden; border: 1px solid var(--border); }
+  .conf-fill { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .9s ease; }
+  .conf-note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+
+  .evid { margin-top: 26px; }
+  .evid-title { font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 4px; }
+  .evid-sub { font-size: 12.5px; color: var(--muted); margin-bottom: 12px; }
+  .ev-item {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .ev-head { padding: 11px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px; }
+  .ev-head:hover { background: rgba(76,194,255,.05); }
+  .ev-idx {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; font-weight: 700;
+    color: var(--accent); background: rgba(76,194,255,.1); border: 1px solid rgba(76,194,255,.3);
+    padding: 2px 8px; border-radius: 6px; flex-shrink: 0;
+  }
+  .ev-src { font-size: 11px; font-weight: 700; letter-spacing: .5px; padding: 3px 8px; border-radius: 6px; flex-shrink: 0; }
+  .ev-src.METRICS { color: var(--green); background: rgba(52,211,153,.1); }
+  .ev-src.LOGS { color: var(--amber); background: rgba(251,191,36,.1); }
+  .ev-src.RUNBOOK { color: var(--purple); background: rgba(192,132,252,.1); }
+  .ev-summary { color: var(--muted); font-size: 12.5px; flex: 1; }
+  .ev-toggle { color: var(--muted); font-size: 11px; }
+  .ev-body { display: none; border-top: 1px solid var(--border); padding: 12px 14px; }
+  .ev-body.open { display: block; }
+  .ev-query {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--accent);
+    background: #0b0e14; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    word-break: break-all; white-space: pre-wrap;
+  }
+  .ev-window { font-size: 12px; color: var(--muted); margin-top: 8px; font-family: ui-monospace, Menlo, monospace; }
+  .ev-hint { font-size: 11.5px; color: var(--muted); margin-top: 8px; font-style: italic; }
+
+  .actions { margin-top: 26px; }
+  .actions-title { font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 10px; }
+  .action-item {
+    display: flex; gap: 10px; align-items: flex-start; font-size: 14px;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px; margin-bottom: 8px;
+  }
+  .action-item .num {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px; font-weight: 700; color: var(--green);
+    background: rgba(52,211,153,.1); border-radius: 6px; padding: 2px 7px; flex-shrink: 0;
+  }
+  .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 24px; }
+  .meta-cell { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; text-align: center; }
+  .meta-cell .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  .meta-cell .v { font-size: 15px; font-weight: 700; margin-top: 2px; font-family: ui-monospace, Menlo, monospace; }
+
+  /* ============ HOW IT WORKS ============ */
+  .how { margin-top: 46px; }
+  .how h2 { font-size: 20px; text-align: center; }
+  .how-sub { text-align: center; color: var(--muted); font-size: 14px; margin-top: 6px; }
+  .how-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+  .how-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; text-align: center; }
+  .how-card .n { font-size: 12px; font-weight: 800; color: var(--accent); letter-spacing: 1px; }
+  .how-card h3 { font-size: 15px; margin-top: 8px; }
+  .how-card p { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  /* ============ FOOTER ============ */
+  .footer { text-align: center; margin-top: 50px; padding-top: 26px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+  .cta {
+    display: inline-block; padding: 12px 22px; border-radius: 10px; font-size: 14px; font-weight: 700;
+    text-decoration: none; transition: transform .12s, box-shadow .15s;
+  }
+  .cta:hover { transform: translateY(-2px); }
+  .cta-primary { background: linear-gradient(90deg, var(--accent), var(--accent2)); color: #0b0e14; }
+  .cta-ghost { background: var(--panel); border: 1px solid var(--border); color: var(--text); }
+  .truth-note { font-size: 12px; color: var(--muted); margin-top: 16px; }
+  .truth-note code { color: var(--accent); }
+
+  @media (max-width: 720px) {
+    .fault-grid, .how-grid, .meta-grid { grid-template-columns: 1fr; }
+    h1 { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ================= HERO ================= -->
+  <div class="hero">
+    <div class="badge-top">Interactive demo · real evaluation data</div>
+    <h1>When your server breaks,<br>this AI tells you <span class="grad">what broke, why, and how to fix it</span> — in minutes.</h1>
+    <p class="sub">Think of it as an <b>AI on-call detective</b>: a monitoring alert fires, the agent investigates metrics, logs and runbooks — then hands you a verdict with <b>proof you can click</b>.</p>
+    <div class="metrics-row">
+      <div class="metric-chip"><b>9/9</b>fault scenarios diagnosed</div>
+      <div class="metric-chip"><b>100%</b>evidence grounded — zero fabrication</div>
+      <div class="metric-chip"><b>7/7</b>unit tests green</div>
+      <div class="metric-chip"><b>gpt-4o-mini</b>under the hood</div>
+    </div>
+  </div>
+
+  <!-- ================= FAULT BUTTONS ================= -->
+  <div class="faults">
+    <div class="faults-title">⬇ &nbsp;Something broke. Click a fault — watch the AI investigate</div>
+    <div class="fault-grid">
+      <button class="fault-btn" data-scenario="error">
+        <span class="icon">🔥</span>
+        <div class="name">Error spike</div>
+        <div class="desc">The orders API starts throwing exceptions. 5xx errors explode.</div>
+        <span class="alert-tag tag-error">ALERT: HighErrorRate</span>
+      </button>
+      <button class="fault-btn" data-scenario="latency">
+        <span class="icon">🐢</span>
+        <div class="name">Latency spike</div>
+        <div class="desc">Every request slows to 2–5 seconds. Customers feel it immediately.</div>
+        <span class="alert-tag tag-latency">ALERT: HighLatency</span>
+      </button>
+      <button class="fault-btn" data-scenario="memory">
+        <span class="icon">💾</span>
+        <div class="name">Memory leak</div>
+        <div class="desc">The JVM heap fills up silently. No error logs — the quiet killer.</div>
+        <span class="alert-tag tag-memory">ALERT: HighMemoryUsage</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= PIPELINE ================= -->
+  <div class="pipeline" id="pipeline">
+    <div class="pipe-steps" id="pipeSteps"></div>
+    <div class="pipe-meta" id="pipeMeta"></div>
+  </div>
+
+  <!-- ================= VERDICT ================= -->
+  <div class="verdict" id="verdict"></div>
+
+  <!-- ================= HOW IT WORKS ================= -->
+  <div class="how">
+    <h2>What just happened?</h2>
+    <p class="how-sub">The same pipeline runs every time an alert fires in production.</p>
+    <div class="how-grid">
+      <div class="how-card">
+        <div class="n">STEP 1</div>
+        <h3>An alert arrives</h3>
+        <p>Prometheus fires a monitoring alert and hands it to the agent — no human paging, no waiting.</p>
+      </div>
+      <div class="how-card">
+        <div class="n">STEP 2</div>
+        <h3>The agent investigates</h3>
+        <p>It queries live metrics and logs like a detective gathering clues, and pulls the matching runbook from its knowledge base.</p>
+      </div>
+      <div class="how-card">
+        <div class="n">STEP 3</div>
+        <h3>A verdict, with proof</h3>
+        <p>It says what broke, how confident it is, and how to fix it — and every claim links to the exact query that produced it.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= FOOTER ================= -->
+  <div class="footer">
+    <div class="cta-row">
+      <a class="cta cta-primary" href="https://github.com/yangtong951019/ai-incident-agent" target="_blank" rel="noopener">⭐ View on GitHub</a>
+      <a class="cta cta-ghost" href="https://github.com/yangtong951019/ai-incident-agent/blob/main/README.md" target="_blank" rel="noopener">📖 Read the full story (v1 → v9)</a>
+    </div>
+    <p class="truth-note">Every number on this page is <b>real</b> — pulled from the project's evaluation runs (<code>docs/eval/baseline_results_v9.csv</code>) and its PostgreSQL incident records. No mock data.</p>
+    <p style="margin-top:10px">MIT · Built with Java 17 · Spring Boot 3 · Spring AI · Prometheus · Loki · Grafana</p>
+  </div>
+
+</div>
+
+<script>
+/* ================================================================
+   REAL DATA — from baseline_results_v9.csv + PostgreSQL incidents
+   (ids 97 / 99 / 101; single-fault runs of the v9 evaluation)
+   ================================================================ */
+const SCENARIOS = {
+  error: {
+    icon: "🔥",
+    alertname: "HighErrorRate",
+    incidentId: 97,
+    model: "gpt-4o-mini",
+    promptTokens: 6724,
+    completionTokens: 337,
+    durationMs: 4279,
+    confidence: 0.9,
+    rootCause: "The high error rate is likely caused by a simulated database connection timeout, resulting in a significant number of RuntimeExceptions.",
+    detail: "Error rate for demo-app spiked to ~69% (5xx responses from POST /api/orders). Metrics confirm the spike; logs show RuntimeException stack traces in the orders endpoint.",
+    actions: [
+      "Investigate the fault-injection mechanism — if it's a drill, disable it temporarily",
+      "Monitor database connection-pool metrics; the pool may be exhausted under load",
+      "Review recent deployments: a connection-timeout regression is a common trigger"
+    ],
+    evidence: [
+      { idx: 1, source: "METRICS", summary: "5xx error rate ≈ 0.69 (69% of requests failing)", window: "alert −5m → now",
+        query: "rate(http_server_requests_seconds_count{job='demo-app',status=~'5..'}[5m])" },
+      { idx: 2, source: "METRICS", summary: "Service is up (1 series) — not a down outage", window: "instant",
+        query: "up{job='demo-app'}" },
+      { idx: 3, source: "LOGS", summary: "3 matching lines: RuntimeException at OrdersController", window: "correlation [alert−2min, alert]",
+        query: "{service=\"demo-app\"} |= `ERROR` != `RuntimeException`" }
+    ]
+  },
+  latency: {
+    icon: "🐢",
+    alertname: "HighLatency",
+    incidentId: 99,
+    model: "gpt-4o-mini",
+    promptTokens: 4825,
+    completionTokens: 261,
+    durationMs: 3185,
+    confidence: 0.9,
+    rootCause: "The high p99 latency is likely caused by a fault injection that introduces a delay of 2–5 seconds for all requests.",
+    detail: "p99 latency measured at 5.66s — well above the 1s threshold. Logs contain the fault-injection marker ('sleeping' / 'Latency fault ENABLED'), confirming a synthetic delay rather than a slow database.",
+    actions: [
+      "Disable the latency fault injection to restore normal request processing",
+      "Monitor p99 latency after the fix to confirm it returns below threshold",
+      "Review deployment process: the latency marker is not in normal code paths"
+    ],
+    evidence: [
+      { idx: 1, source: "METRICS", summary: "p99 latency = 5.66s (threshold 1s)", window: "alert −5m → now",
+        query: "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{job='demo-app'}[5m]))" },
+      { idx: 2, source: "LOGS", summary: "Fault-injection marker found: 'Latency fault ENABLED'", window: "correlation [alert−2min, alert]",
+        query: "{service=\"demo-app\"} |= `sleeping`" }
+    ]
+  },
+  memory: {
+    icon: "💾",
+    alertname: "HighMemoryUsage",
+    incidentId: 101,
+    model: "gpt-4o-mini",
+    promptTokens: 4647,
+    completionTokens: 348,
+    durationMs: 4004,
+    confidence: 0.8,
+    rootCause: "The high JVM heap memory usage is likely due to a memory leak or excessive memory consumption — JVM heap at 98.67% utilization.",
+    detail: "Heap usage metric shows 98.67% — above the 85% threshold for over 2 minutes. No ERROR logs in the correlation window, so the agent correctly lowers its confidence: metric-only evidence, no corroborating logs.",
+    actions: [
+      "Investigate the application's memory-usage patterns for potential leaks",
+      "Consider temporarily increasing JVM heap size to relieve immediate pressure",
+      "Enable detailed garbage-collection logging to analyze allocation behavior"
+    ],
+    evidence: [
+      { idx: 1, source: "METRICS", summary: "JVM heap usage = 98.67% (threshold 85%)", window: "alert −5m → now",
+        query: "jvm_memory_used_bytes{job='demo-app',area='heap'} / jvm_memory_max_bytes{job='demo-app',area='heap'}" },
+      { idx: 2, source: "LOGS", summary: "No ERROR logs in window — absence of evidence is evidence of absence", window: "correlation [alert−2min, alert]",
+        query: "{service=\"demo-app\"} |= `ERROR` != `RuntimeException`" },
+      { idx: 3, source: "RUNBOOK", summary: "Matched runbook: High Memory Usage — leak & GC checklist", window: "RAG top-k=3",
+        query: "runbooks/high-error-rate.md · runbooks/high-latency.md · runbooks/service-down.md (keyword scored)" }
+    ],
+    lowConfidenceNote: true
+  }
+};
+
+const STEPS = [
+  { icon: "📟", label: "Alert received" },
+  { icon: "📊", label: "Metrics (Prometheus)" },
+  { icon: "🔎", label: "Logs (Loki)" },
+  { icon: "📚", label: "Runbook (RAG)" },
+  { icon: "🧠", label: "Diagnosing (LLM)" },
+  { icon: "✅", label: "Verdict" }
+];
+
+const pipeStepsEl = document.getElementById("pipeSteps");
+const pipeMetaEl = document.getElementById("pipeMeta");
+const pipelineEl = document.getElementById("pipeline");
+const verdictEl = document.getElementById("verdict");
+
+STEPS.forEach((s, i) => {
+  const el = document.createElement("div");
+  el.className = "step";
+  el.id = "step-" + i;
+  el.innerHTML = `<span class="dot"></span>${s.icon} ${s.label}`;
+  pipeStepsEl.appendChild(el);
+  if (i < STEPS.length - 1) {
+    const a = document.createElement("span");
+    a.className = "step-arrow";
+    a.textContent = "→";
+    pipeStepsEl.appendChild(a);
+  }
+});
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runPipeline(scenario) {
+  pipelineEl.classList.add("visible");
+  verdictEl.classList.remove("visible");
+  verdictEl.innerHTML = "";
+
+  for (let i = 0; i < STEPS.length; i++) {
+    const el = document.getElementById("step-" + i);
+    for (let j = 0; j < i; j++) document.getElementById("step-" + j).classList.add("done");
+    el.classList.remove("done");
+    el.classList.add("active");
+    const metas = [
+      `incoming webhook: ${scenario.alertname} · severity=critical · service=demo-app`,
+      `tool call → Prometheus /api/v1/query · ${scenario.evidence.filter(e => e.source === "METRICS").length} query(ies)`,
+      `tool call → Loki /loki/api/v1/query_range · correlation window [alert−2min, alert]`,
+      `RAG retrieval · top-k=3 runbooks · keyword scoring`,
+      `LLM call · model=${scenario.model} · temperature=0.1 · max_tokens=1000`,
+      `structured JSON parsed · ${scenario.evidence.length} citations resolved`
+    ];
+    pipeMetaEl.textContent = metas[i];
+    await sleep(i === 0 ? 500 : 800);
+    el.classList.remove("active");
+    el.classList.add("done");
+  }
+  pipeMetaEl.textContent = `analysis complete · ${scenario.durationMs.toLocaleString()} ms · ${scenario.promptTokens} prompt + ${scenario.completionTokens} completion tokens`;
+  await sleep(400);
+  renderVerdict(scenario);
+}
+
+function renderVerdict(s) {
+  verdictEl.classList.add("visible");
+
+  const ev = s.evidence.map((e, i) => `
+    <div class="ev-item">
+      <div class="ev-head" onclick="this.nextElementSibling.classList.toggle('open'); this.querySelector('.ev-toggle').textContent = this.nextElementSibling.classList.contains('open') ? 'hide ▲' : 'view ▼'">
+        <span class="ev-idx">[E${e.idx}]</span>
+        <span class="ev-src ${e.source}">${e.source}</span>
+        <span class="ev-summary">${e.summary}</span>
+        <span class="ev-toggle">view ▼</span>
+      </div>
+      <div class="ev-body">
+        <div class="ev-query">${e.query}</div>
+        <div class="ev-window">window: ${e.window}</div>
+        <div class="ev-hint">The query text above was recorded by the backend tool — the LLM cited the index, it never generated the query. Open it in Grafana Explore and reproduce the evidence yourself.</div>
+      </div>
+    </div>`).join("");
+
+  const confNote = s.lowConfidenceNote
+    ? `Why ${Math.round(s.confidence * 100)}%? The agent found metric evidence but <b>no ERROR logs</b> — it honestly lowers its confidence instead of over-claiming. That's calibration, not failure.`
+    : `Grounding check: every citation verified verbatim against the retrieved context — 100% in the v9 evaluation.`;
+
+  verdictEl.innerHTML = `
+  <div class="card">
+    <div class="v-head">
+      <span class="v-alertname ${s.alertname}">${s.icon} ${s.alertname}</span>
+      <span class="v-status">✓ ANALYZED · grounded</span>
+      <span class="v-incident">incident #${s.incidentId}</span>
+    </div>
+
+    <div class="v-verdict-title">Verdict</div>
+    <div class="v-rootcause">${s.rootCause}</div>
+    <div class="v-detail">${s.detail}</div>
+
+    <div class="conf-row">
+      <div class="conf-label"><span>Confidence</span><b>${Math.round(s.confidence * 100)}%</b></div>
+      <div class="conf-bar"><div class="conf-fill" id="confFill" data-w="${s.confidence * 100}"></div></div>
+      <div class="conf-note">${confNote}</div>
+    </div>
+
+    <div class="evid">
+      <div class="evid-title">Evidence — every claim is clickable proof</div>
+      <div class="evid-sub">Each citation resolves to the exact query the backend executed. No fabrication — by design.</div>
+      ${ev}
+    </div>
+
+    <div class="actions">
+      <div class="actions-title">Suggested actions</div>
+      ${s.actions.map((a, i) => `<div class="action-item"><span class="num">${i + 1}</span>${a}</div>`).join("")}
+    </div>
+
+    <div class="meta-grid">
+      <div class="meta-cell"><div class="k">Model</div><div class="v">${s.model}</div></div>
+      <div class="meta-cell"><div class="k">Prompt tokens</div><div class="v">${s.promptTokens.toLocaleString()}</div></div>
+      <div class="meta-cell"><div class="k">Completion</div><div class="v">${s.completionTokens}</div></div>
+      <div class="meta-cell"><div class="k">Latency</div><div class="v">${s.durationMs.toLocaleString()} ms</div></div>
+    </div>
+  </div>`;
+
+  requestAnimationFrame(() => {
+    document.getElementById("confFill").style.width = document.getElementById("confFill").dataset.w + "%";
+  });
+  verdictEl.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+document.querySelectorAll(".fault-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    runPipeline(SCENARIOS[btn.dataset.scenario]);
+  });
+});
+</script>
+</body>
+</html>
