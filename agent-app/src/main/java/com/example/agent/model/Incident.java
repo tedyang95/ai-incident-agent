@@ -77,7 +77,6 @@ public class Incident {
 
     @Column(columnDefinition = "TEXT")
     private String evidenceAlignment; // consistent / conflicting / insufficient
-
     // v9 executable evidence citations: the LLM cites index numbers [E{n}], and
     // the backend resolves them to the real executed queries + clickable deep links
     // (JSON array). Invented indexes resolve to resolved=false with no query/url —
@@ -93,7 +92,8 @@ public class Incident {
     private String errorMessage;
 
     // LLM call tracing
-    private String modelUsed;
+    private String model;       // model alias requested by the caller (webhook), optional
+    private String modelUsed;   // model alias that actually served the analysis (resolved)
     private Integer promptTokens;
     private Integer completionTokens;
     private Long analysisDurationMs;
@@ -177,6 +177,9 @@ public class Incident {
 
     public String getModelUsed() { return modelUsed; }
     public void setModelUsed(String modelUsed) { this.modelUsed = modelUsed; }
+
+    public String getModel() { return model; }
+    public void setModel(String model) { this.model = model; }
 
     public Integer getPromptTokens() { return promptTokens; }
     public void setPromptTokens(Integer promptTokens) { this.promptTokens = promptTokens; }

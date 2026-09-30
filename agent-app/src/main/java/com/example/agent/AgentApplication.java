@@ -2,6 +2,7 @@ package com.example.agent;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
  * AI Incident Triage Agent — application entry point.
@@ -24,6 +25,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * - (Target) L5 Agentic Core → multi-round investigation loop
  */
 @SpringBootApplication
+@ConfigurationPropertiesScan
 public class AgentApplication {
 
     public static void main(String[] args) {

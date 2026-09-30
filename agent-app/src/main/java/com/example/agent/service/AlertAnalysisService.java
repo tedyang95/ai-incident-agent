@@ -1,5 +1,6 @@
 package com.example.agent.service;
 
+import com.example.agent.config.AiModelRegistry;
 import com.example.agent.evidence.Evidence;
 import com.example.agent.evidence.QueryRecord;
 import com.example.agent.model.Incident;
@@ -58,7 +59,7 @@ public class AlertAnalysisService {
     private final PrometheusToolService prometheusTool;
     private final LokiToolService lokiTool;
     private final RunbookRetrievalService runbookRetrieval;
-    private final ChatClient chatClient;
+    private final AiModelRegistry modelRegistry;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AlertAnalysisService(
@@ -66,12 +67,12 @@ public class AlertAnalysisService {
             PrometheusToolService prometheusTool,
             LokiToolService lokiTool,
             RunbookRetrievalService runbookRetrieval,
-            ChatClient.Builder chatClientBuilder) {
+            AiModelRegistry modelRegistry) {
         this.repository = repository;
         this.prometheusTool = prometheusTool;
         this.lokiTool = lokiTool;
         this.runbookRetrieval = runbookRetrieval;
-        this.chatClient = chatClientBuilder.build();
+        this.modelRegistry = modelRegistry;
     }
 
     /**
@@ -207,7 +208,13 @@ public class AlertAnalysisService {
         // ============================================================
         log.info("Step 3: Calling LLM for root cause analysis");
 
-        ChatResponse response = chatClient.prompt()
+        // Model selection: honor the caller's requested alias (webhook "model"
+        // field); fall back to the default model for null/blank/unknown aliases.
+        String modelName = modelRegistry.resolveName(incident.getModel());
+        ChatClient client = modelRegistry.clientFor(modelName);
+        log.info("Step 3: serving with model alias '{}'", modelName);
+
+        ChatResponse response = client.prompt()
                 .system(systemPrompt)
                 .user(userPrompt)
                 .call()
@@ -221,7 +228,7 @@ public class AlertAnalysisService {
             incident.setPromptTokens(response.getMetadata().getUsage().getPromptTokens().intValue());
             incident.setCompletionTokens(response.getMetadata().getUsage().getGenerationTokens().intValue());
         }
-        incident.setModelUsed("gpt-4o-mini");
+        incident.setModelUsed(modelName);
 
         // ============================================================
         // Step 4: Parse the structured output

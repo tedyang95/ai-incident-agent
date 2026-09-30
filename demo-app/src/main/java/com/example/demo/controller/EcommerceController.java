@@ -3,12 +3,16 @@ package com.example.demo.controller;
 import com.example.demo.model.Product;
 import com.example.demo.model.Order;
 import com.example.demo.config.FaultState;
+import com.example.demo.service.UpstreamClient;
 import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.sql.SQLTransientConnectionException;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -20,10 +24,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * Exposes the normal business endpoints plus fault-injection endpoints used to
  * trigger alerts so the AI agent has realistic scenarios to analyze:
  * <ul>
- *   <li>/admin/fail/error   → start returning 500s (triggers HighErrorRate)</li>
- *   <li>/admin/fail/latency → inject 2-5s delays (triggers HighLatency)</li>
- *   <li>/admin/fail/memory  → start a memory leak (triggers HighMemoryUsage)</li>
- *   <li>/admin/fail/stop    → stop all active faults</li>
+ *   <li>/admin/fail/error      → 500s with a connection-pool style failure (HighErrorRate)</li>
+ *   <li>/admin/fail/latency    → inject 2-5s delays (triggers HighLatency)</li>
+ *   <li>/admin/fail/memory     → start a memory leak (triggers HighMemoryUsage)</li>
+ *   <li>/admin/fail/downstream → simulated payment-service timeout → 502 (HighErrorRate, cross-service)</li>
+ *   <li>/admin/fail/stop       → stop all active faults</li>
  * </ul>
  */
 @RestController
@@ -33,11 +38,13 @@ public class EcommerceController {
     private static final Logger log = LoggerFactory.getLogger(EcommerceController.class);
     private final Random random = new Random();
     private final FaultState faultState;
+    private final UpstreamClient upstreamClient;
     private final Map<Long, Product> products = new ConcurrentHashMap<>();
     private final Map<Long, Order> orders = new ConcurrentHashMap<>();
 
-    public EcommerceController(FaultState faultState) {
+    public EcommerceController(FaultState faultState, UpstreamClient upstreamClient) {
         this.faultState = faultState;
+        this.upstreamClient = upstreamClient;
         // Seed some sample catalog data.
         products.put(1L, new Product(1L, "Laptop", 999.99, 50));
         products.put(2L, new Product(2L, "Phone", 699.99, 100));
@@ -71,9 +78,11 @@ public class EcommerceController {
 
     @PostMapping("/orders")
     @Timed(value = "api.orders.create", description = "Time taken to create an order")
-    public ResponseEntity<Order> createOrder(@RequestBody Map<String, Object> request) {
+    public ResponseEntity<Order> createOrder(@RequestBody Map<String, Object> request)
+            throws SQLTransientConnectionException {
         simulateLatencyIfEnabled();
         throwErrorIfEnabled();
+        chargeThroughDownstreamIfEnabled();
 
         Long productId = Long.valueOf(request.get("productId").toString());
         int quantity = Integer.parseInt(request.get("quantity").toString());
@@ -139,6 +148,13 @@ public class EcommerceController {
         return ResponseEntity.ok(Map.of("fault", "memory", "status", "enabled"));
     }
 
+    @PostMapping("/admin/fail/downstream")
+    public ResponseEntity<Map<String, String>> enableDownstreamFault() {
+        faultState.setDownstreamEnabled(true);
+        log.warn("FAULT INJECTION: Downstream fault ENABLED - payment-service calls will time out (502)");
+        return ResponseEntity.ok(Map.of("fault", "downstream", "status", "enabled"));
+    }
+
     @PostMapping("/admin/fail/stop")
     public ResponseEntity<Map<String, String>> stopAllFaults() {
         faultState.reset();
@@ -167,10 +183,30 @@ public class EcommerceController {
         }
     }
 
-    private void throwErrorIfEnabled() {
+    private void throwErrorIfEnabled() throws SQLTransientConnectionException {
         if (faultState.isErrorEnabled()) {
-            log.error("Error fault injected: throwing RuntimeException for order creation");
-            throw new RuntimeException("Injected fault: database connection timeout (simulated)");
+            // Mirrors what a real HikariCP pool exhaustion looks like in production:
+            // a SQLTransientConnectionException whose message carries pool statistics.
+            log.error("Error fault injected: database connection pool exhausted, active=8 idle=0 maxPoolSize=10");
+            throw new SQLTransientConnectionException(
+                    "HikariPool-1 - Connection is not available, request timed out after 30000ms."
+                            + " active=8 idle=0 maxPoolSize=10");
+        }
+    }
+
+    private void chargeThroughDownstreamIfEnabled() {
+        if (faultState.isDownstreamEnabled()) {
+            long orderId = System.currentTimeMillis();
+            try {
+                upstreamClient.charge(orderId, 100.00);
+            } catch (java.net.SocketTimeoutException e) {
+                // The failure is in the downstream dependency, not in this service.
+                // Surfaced as HTTP 502 Bad Gateway — the same signature a gateway
+                // produces when an upstream call exceeds its read timeout.
+                log.error("Downstream failure: payment-service timed out for orderId={} → returning 502", orderId);
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "Upstream payment-service read timed out after 3000ms", e);
+            }
         }
     }
 }

@@ -18,6 +18,7 @@ public class FaultState {
     private final AtomicBoolean errorEnabled = new AtomicBoolean(false);
     private final AtomicBoolean latencyEnabled = new AtomicBoolean(false);
     private final AtomicBoolean memoryLeakEnabled = new AtomicBoolean(false);
+    private final AtomicBoolean downstreamEnabled = new AtomicBoolean(false);
 
     // Retains references so allocated memory is never released (memory-leak simulation).
     private final List<byte[]> memoryLeakHolder = new ArrayList<>();
@@ -49,11 +50,20 @@ public class FaultState {
         }
     }
 
+    public boolean isDownstreamEnabled() {
+        return downstreamEnabled.get();
+    }
+
+    public void setDownstreamEnabled(boolean enabled) {
+        this.downstreamEnabled.set(enabled);
+    }
+
     public List<String> getActiveFaults() {
         List<String> faults = new ArrayList<>();
         if (errorEnabled.get()) faults.add("error");
         if (latencyEnabled.get()) faults.add("latency");
         if (memoryLeakEnabled.get()) faults.add("memory_leak");
+        if (downstreamEnabled.get()) faults.add("downstream");
         return faults;
     }
 
@@ -61,6 +71,7 @@ public class FaultState {
         errorEnabled.set(false);
         latencyEnabled.set(false);
         memoryLeakEnabled.set(false);
+        downstreamEnabled.set(false);
         memoryLeakHolder.clear();
         System.gc();
     }

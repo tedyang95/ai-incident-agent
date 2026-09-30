@@ -1,5 +1,6 @@
 package com.example.agent.service;
 
+import com.example.agent.config.AiModelRegistry;
 import com.example.agent.evidence.QueryRecord;
 import com.example.agent.model.Incident;
 import com.example.agent.rag.RunbookRetrievalService;
@@ -57,7 +58,7 @@ class AlertAnalysisServiceTest {
     private RunbookRetrievalService runbookRetrieval;
 
     @Mock
-    private ChatClient.Builder chatClientBuilder;
+    private AiModelRegistry modelRegistry;
 
     @Mock
     private ChatClient chatClient;
@@ -79,16 +80,16 @@ class AlertAnalysisServiceTest {
 
     /**
      * Constructs the service under test manually (no @InjectMocks):
-     * the AlertAnalysisService constructor calls chatClientBuilder.build()
-     * immediately, so build() must be stubbed before construction — otherwise
-     * chatClient would be null. (@InjectMocks instantiates the object before
-     * any stubs take effect.)
+     * the registry must return a stubbed ChatClient before construction,
+     * otherwise clientFor() would hand back null. (@InjectMocks instantiates
+     * the object before any stubs take effect.)
      */
     @BeforeEach
     void setUp() {
-        when(chatClientBuilder.build()).thenReturn(chatClient);
+        when(modelRegistry.resolveName(any())).thenReturn("gpt-4o-mini");
+        when(modelRegistry.clientFor(any())).thenReturn(chatClient);
         alertAnalysisService = new AlertAnalysisService(
-                repository, prometheusTool, lokiTool, runbookRetrieval, chatClientBuilder);
+                repository, prometheusTool, lokiTool, runbookRetrieval, modelRegistry);
     }
 
     private AlertAnalysisService alertAnalysisService;

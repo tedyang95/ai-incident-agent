@@ -45,9 +45,10 @@ public class AlertWebhookController {
         List<Map<String, Object>> results = new ArrayList<>();
 
         // Alertmanager may batch multiple alerts in a single webhook delivery.
+        String requestedModel = payload.path("model").asText(null); // optional model alias
         for (JsonNode alert : payload.path("alerts")) {
             try {
-                Incident incident = parseAlert(alert);
+                Incident incident = parseAlert(alert, requestedModel);
                 Incident saved = analysisService.createAndAnalyze(incident);
                 Map<String, Object> result = new HashMap<>();
                 result.put("id", saved.getId());
@@ -72,9 +73,13 @@ public class AlertWebhookController {
 
     /**
      * Parses a single Alertmanager alert into an Incident entity.
+     *
+     * @param alert    one entry of the webhook {@code alerts} array
+     * @param model    the optional model alias requested by the caller (may be null)
      */
-    private Incident parseAlert(JsonNode alert) {
+    private Incident parseAlert(JsonNode alert, String model) {
         Incident incident = new Incident();
+        incident.setModel(model); // requested alias; resolved by the model registry at analysis time
 
         // Extract alert context from labels.
         JsonNode labels = alert.path("labels");

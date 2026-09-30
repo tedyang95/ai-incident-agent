@@ -38,6 +38,18 @@ app:
     url: ${LOKI_URL:http://localhost:3100}
   alertmanager:
     url: ${ALERTMANAGER_URL:http://localhost:9093}
+  # Selectable model aliases (model selector). The default model is the one
+  # configured under spring.ai.openai.chat.options.model; these aliases are
+  # additional options callers can request via the webhook "model" field.
+  # All entries here must be resolvable with the configured OpenAI API key.
+  ai:
+    models:
+      - name: gpt-4o-mini
+        model: gpt-4o-mini
+      - name: gpt-4.1-mini
+        model: gpt-4.1-mini
+      - name: gpt-4o
+        model: gpt-4o
 
 # Actuator
 management:
