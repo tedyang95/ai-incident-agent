@@ -13,7 +13,8 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 | Signal | Data |
 |---|---|
 | 🎯 **Fault diagnosis** | **9/9** scenarios correctly diagnosed — 3 single (error / latency / memory) + 3 composite (multi-alert) |
-| 🔍 **Evidence grounding** | **100%** of `[metric:]` / `[log:]` citations verified verbatim against retrieved context |
+| 🔍 **Evidence grounding** | **100%** of citations verified verbatim against retrieved context |
+| 🔗 **Executable evidence** | LLM cites by **index** → backend resolves to real PromQL/LogQL + clickable Grafana deep links; fabricated indexes resolve to nothing |
 | 🎯 **Composite discrimination** | **9/9** across concurrent-fault cases; HighLatency 0.8 wrong call → **0.9** correct after retrieval isolation |
 | 📈 **Tuning impact** | latency diagnosis confidence **0.5 → 0.9** after fixing a one-character LogQL bug + alert-aware retrieval |
 | 🏭 **Real stack** | Prometheus → Alertmanager → AI Agent → Loki → Grafana → PostgreSQL, all in Docker Compose |
@@ -50,7 +51,7 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 
 ---
 
-## 🔬 The tuning story (v1 → v8)
+## 🔬 The tuning story (v1 → v9)
 
 | Run | Change | Result | Lesson |
 |---|---|---|---|
@@ -60,6 +61,7 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 | v6 | **correlation-window retrieval** | error 0.9, cross-contamination gone | query the alert's time window, not "now" |
 | v7b | **alert-aware keyword search** | latency 0.5 → 0.9 | tool signatures should adapt to the task |
 | v8 | **retrieval isolation + discrimination rules** | **9/9, 100% grounding, HighLatency 0.8 → 0.9** | feed clean evidence, then teach the model to discriminate |
+| v9 | **executable evidence citations** | **9/9 held, grounding 100%; citations resolve to real queries + Grafana links** | trust the index, not the model's memory |
 
 Full experiment log with data: **[docs/TUNING.md](docs/TUNING.md)**
 
@@ -67,7 +69,7 @@ Full experiment log with data: **[docs/TUNING.md](docs/TUNING.md)**
 
 ## 🧪 How it's tested
 
-5 unit tests cover **every branch** of the core service — LLM failure (graceful degradation), success (structured output parsing), invalid JSON (fallback), markdown-wrapped JSON (parser tolerance), oversized context (truncation guard). All external dependencies mocked: deterministic, isolated, ~1.7s.
+7 unit tests cover **every branch** of the core service — LLM failure (graceful degradation), success (structured output parsing), invalid JSON (fallback), markdown-wrapped JSON (parser tolerance), oversized context (truncation guard), plus v9 citation resolution (real evidence → resolved) and anti-fabrication (invented index → nothing). All external dependencies mocked: deterministic, isolated, ~1.7s.
 
 → **[docs/TESTING-STRATEGY.md](docs/TESTING-STRATEGY.md)**
 
