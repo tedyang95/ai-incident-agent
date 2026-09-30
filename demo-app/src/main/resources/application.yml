@@ -1,4 +1,4 @@
-# Demo App 配置
+# Demo App configuration
 server:
   port: 8080
 
@@ -18,7 +18,7 @@ spring:
     console:
       enabled: true
 
-# Actuator - 暴露 Prometheus metrics
+# Actuator - exposes Prometheus metrics
 management:
   endpoints:
     web:
@@ -34,7 +34,7 @@ management:
       percentiles-histogram:
         http.server.requests: true
 
-# 日志格式 - JSON 结构化日志，方便 Loki 解析
+# Log format - structured console output for easy Loki parsing
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

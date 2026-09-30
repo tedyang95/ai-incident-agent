@@ -1,5 +1,5 @@
 # AI Incident Triage Agent - Docker Compose
-# 一键启动整个技术栈：demo应用 + 监控 + AI Agent
+# One command brings up the full stack: demo app + monitoring + AI agent
 # Usage: docker compose up -d
 
 networks:
@@ -14,7 +14,7 @@ volumes:
 
 services:
   # ============================================================
-  # 1. Demo App - 被监控的示例应用（产生日志和指标）
+  # 1. Demo App - the monitored sample service (emits logs and metrics)
   # ============================================================
   demo-app:
     build:
@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # 2. Prometheus - 指标采集（metrics collection）
+  # 2. Prometheus - metrics collection and alert rules
   # ============================================================
   prometheus:
     image: prom/prometheus:v2.53.0
@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # 3. Alertmanager - 告警管理（alert routing & notification）
+  # 3. Alertmanager - alert routing and notification
   # ============================================================
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -67,7 +67,7 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # 4. Loki - 日志聚合（log aggregation）
+  # 4. Loki - log aggregation
   # ============================================================
   loki:
     image: grafana/loki:2.9.4
@@ -83,7 +83,7 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # 5. Promtail - 日志采集器（log collector），把日志发给 Loki
+  # 5. Promtail - log collector, ships container logs to Loki
   # ============================================================
   promtail:
     image: grafana/promtail:2.9.4
@@ -100,7 +100,7 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # 6. Grafana - 可视化面板（visualization dashboard）
+  # 6. Grafana - visualization dashboards
   # ============================================================
   grafana:
     image: grafana/grafana:10.4.2
@@ -123,7 +123,7 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # 7. PostgreSQL - AI Agent 的数据库（存 incident 记录和 RAG 知识）
+  # 7. PostgreSQL - the agent's database (incidents + RAG knowledge)
   # ============================================================
   postgres:
     image: postgres:16-alpine
@@ -141,7 +141,7 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # 8. AI Agent - 核心服务（接收告警 → 分析 → 根因定位）
+  # 8. AI Agent - core service (receives alerts → analyzes → root cause)
   # ============================================================
   agent-app:
     build:
@@ -160,7 +160,7 @@ services:
       - PROMETHEUS_URL=http://prometheus:9090
       - LOKI_URL=http://loki:3100
       - ALERTMANAGER_URL=http://alertmanager:9093
-      # LLM API 配置（启动前填入你的 API key）
+      # LLM API config (fill in your API key before starting)
       - SPRING_AI_OPENAI_API_KEY=${OPENAI_API_KEY:-your-api-key-here}
       - SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL=gpt-4o-mini
     depends_on:

@@ -31,27 +31,23 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 告警分析服务 - AI Agent 的核心编排（orchestration）
+ * Alert analysis service — the agent's core orchestration brain.
  * <p>
- * 分析流程（LLM Workflow）：
- * 1. 保存告警到数据库
- * 2. 收集上下文（context collection）：
- * a. Prometheus 指标概览（metrics）
- * b. Loki 错误日志和异常（logs）
- * c. Runbook RAG 检索（knowledge base）
- * 3. 构建结构化 prompt，把所有上下文喂给 LLM
- * 4. LLM 输出结构化 JSON（structured output）：根因、置信度、建议动作
- * 5. 解析 JSON，保存分析结果
- * 6. 异常处理：LLM 失败时降级为规则分析（fallback）
+ * Analysis workflow:
+ * 1. Persist the incoming alert
+ * 2. Collect context:
+ *    a. Prometheus metrics overview (metrics)
+ *    b. Loki error logs and exceptions (logs)
+ *    c. Runbook RAG retrieval (knowledge base)
+ * 3. Build a structured prompt from all context
+ * 4. LLM returns structured JSON: root cause, confidence, suggested actions
+ * 5. Parse and persist the analysis result
+ * 6. On LLM failure, degrade gracefully to a rule-based fallback
  * <p>
- * 对应 AI 产品六层框架：
- * - L2 Grounded AI (RAG) → runbook 检索
- * - L3 Tool-using AI → Prometheus + Loki 工具调用
- * - L4 LLM Workflow → 固定的告警分析流程
- * <p>
- * 面试中可以说："I designed and implemented the LLM workflow that orchestrates
- * metric retrieval, log search, RAG, and structured output generation, with
- * fallback mechanisms and full tracing for every LLM call."
+ * AI capability levels addressed:
+ * - L2 Grounded AI (RAG) → runbook retrieval
+ * - L3 Tool-using AI     → Prometheus + Loki tool calls
+ * - L4 LLM Workflow      → fixed alert-analysis pipeline with structured output
  */
 @Service
 public class AlertAnalysisService {
@@ -79,18 +75,18 @@ public class AlertAnalysisService {
     }
 
     /**
-     * 创建 Incident 并触发 AI 分析
-     * 这是 webhook controller 调用的主入口
+     * Creates an Incident and triggers the AI analysis.
+     * This is the main entry point called by the webhook controller.
      */
     public Incident createAndAnalyze(Incident incident) {
-        // 1. 保存初始记录
+        // 1. Persist the initial record.
         incident.setStatus(Incident.AnalysisStatus.ANALYZING);
         incident = repository.save(incident);
         log.info("Incident #{} created: {} ({}/{})",
                 incident.getId(), incident.getAlertname(),
                 incident.getSeverity(), incident.getService());
 
-        // 2. 异步或同步分析（MVP 用同步，后续可改 @Async）
+        // 2. Run the analysis (synchronous in the MVP; can move to @Async later).
         try {
             analyze(incident);
             incident.setStatus(Incident.AnalysisStatus.COMPLETED);
@@ -101,7 +97,7 @@ public class AlertAnalysisService {
             log.error("Incident #{} analysis failed: {}", incident.getId(), e.getMessage(), e);
             incident.setStatus(Incident.AnalysisStatus.FAILED);
             incident.setErrorMessage(truncate(e.getMessage(), 900));
-            // Fallback: 至少保存收集到的原始数据
+            // Fallback: at least keep the collected raw context for manual review.
             incident.setRootCauseHypothesis("Analysis failed - manual review required");
             incident.setConfidence(0.0);
         }
@@ -110,31 +106,28 @@ public class AlertAnalysisService {
     }
 
     /**
-     * 核心分析流程
+     * Core analysis flow.
      */
     private void analyze(Incident incident) {
         long startTime = System.currentTimeMillis();
 
         // ============================================================
-        // Step 1: 收集上下文（Context Collection）
+        // Step 1: Context collection
         // ============================================================
         log.info("Step 1: Collecting context for incident #{}", incident.getId());
 
-        // 1a. Prometheus 指标概览
+        // 1a. Prometheus metrics overview.
         String metrics = prometheusTool.getServiceOverview(incident.getService());
         incident.setRelatedMetrics(truncate(metrics, 2000));
         log.debug("Metrics collected: {} chars", metrics.length());
 
-        // 1b. Loki 日志检索（告警语义关键词 + correlation window）
-        //     关键词由告警类别驱动：latency 告警也搜 slow/sleep/timeout 信号，
-        //     而不只查 ERROR/Exception（latency 故障通常是 WARN/DEBUG 日志，无异常堆栈）
-        //
-        //     检索层判别（retrieval discrimination）：
-        //     - latency 关键词只用故障注入独有的标记（sleeping / Latency fault），
-        //       去掉通用 "timeout"（并发 error 故障的异常信息 "database connection
-        //       timeout" 恰好含该词，会造成证据污染）
-        //     - 非 error-rate 告警在 LogQL 层排除 "RuntimeException"：并发 error 故障
-        //       的异常堆栈不会进入本告警上下文（!= 运算符）
+        // 1b. Loki log search driven by the alert category, within a correlation window.
+        //     Retrieval discrimination:
+        //     - latency keywords use only fault-injection markers (sleeping /
+        //       "Latency fault"), dropping the generic "timeout" (a concurrent
+        //       error's message "database connection timeout" would match it)
+        //     - non-error-rate alerts exclude "RuntimeException" at the LogQL layer
+        //       (concurrent error stack traces never enter this alert's context)
         Instant alertInstant = incident.getReceivedAt().toInstant(ZoneOffset.UTC);
         Instant logFrom = alertInstant.minus(2, ChronoUnit.MINUTES);
         Set<String> keywords = new LinkedHashSet<>();
@@ -157,7 +150,7 @@ public class AlertAnalysisService {
         incident.setRelatedLogs(truncate(logs, 2000));
         log.debug("Logs collected: {} chars", logs.length());
 
-        // 1c. Runbook RAG 检索
+        // 1c. Runbook RAG retrieval.
         String runbooks = runbookRetrieval.retrieve(
                 incident.getAlertname(),
                 incident.getService(),
@@ -167,7 +160,8 @@ public class AlertAnalysisService {
         incident.setMatchedRunbooks(truncate(runbooks, 900));
         log.debug("Runbooks retrieved: {} chars", runbooks.length());
 
-        // 1d. 存完整上下文快照（审计/可复现性：LLM 实际看到的原文，未截断）
+        // 1d. Persist the full context snapshot (audit / reproducibility:
+        //     exactly what the LLM saw, untruncated).
         try {
             Map<String, String> snapshot = new LinkedHashMap<>();
             snapshot.put("metrics", metrics);
@@ -178,9 +172,11 @@ public class AlertAnalysisService {
             log.warn("Failed to save context snapshot: {}", e.getMessage());
         }
 
-        // 1e. 构建 EVIDENCE INDEX（v9 证据链可执行化）
-        //     真实执行的查询由后端工具记录（single source of truth），LLM 只能引用编号，
-        //     无法编造 query/URL。深链 URL（Grafana explore）也由后端生成。
+        // 1e. Build the EVIDENCE INDEX (v9 executable citations).
+        //     Real queries executed by the tools are recorded by the backend
+        //     (single source of truth); the LLM may only cite index numbers and
+        //     can never fabricate queries or URLs. Deep links (Grafana explore)
+        //     are also generated by the backend.
         List<Evidence> evidenceList = new ArrayList<>();
         int idx = 1;
         for (QueryRecord qr : prometheusTool.getLastQueryRecords()) {
@@ -199,7 +195,7 @@ public class AlertAnalysisService {
         log.debug("Evidence index built: {} entries", evidenceList.size());
 
         // ============================================================
-        // Step 2: 构建 Prompt（Prompt Engineering）
+        // Step 2: Build the prompt (prompt engineering)
         // ============================================================
         log.info("Step 2: Building prompt for LLM analysis");
 
@@ -207,7 +203,7 @@ public class AlertAnalysisService {
         String userPrompt = buildUserPrompt(incident, metrics, logs, runbooks, evidenceIndexPrompt);
 
         // ============================================================
-        // Step 3: 调用 LLM（LLM Call）
+        // Step 3: Call the LLM
         // ============================================================
         log.info("Step 3: Calling LLM for root cause analysis");
 
@@ -220,7 +216,7 @@ public class AlertAnalysisService {
         String llmOutput = response.getResult().getOutput().getContent();
         log.debug("LLM output: {}", llmOutput);
 
-        // 记录 token 使用（tracing / cost tracking）
+        // Record token usage (tracing / cost tracking).
         if (response.getMetadata() != null && response.getMetadata().getUsage() != null) {
             incident.setPromptTokens(response.getMetadata().getUsage().getPromptTokens().intValue());
             incident.setCompletionTokens(response.getMetadata().getUsage().getGenerationTokens().intValue());
@@ -228,13 +224,13 @@ public class AlertAnalysisService {
         incident.setModelUsed("gpt-4o-mini");
 
         // ============================================================
-        // Step 4: 解析结构化输出（Structured Output Parsing）
+        // Step 4: Parse the structured output
         // ============================================================
         log.info("Step 4: Parsing structured LLM output");
 
         parseAndSaveAnalysis(incident, llmOutput, evidenceList);
 
-        // 记录分析耗时
+        // Record analysis duration.
         incident.setAnalysisDurationMs(System.currentTimeMillis() - startTime);
 
         log.info("Analysis complete: rootCause='{}', confidence={}",
@@ -242,7 +238,7 @@ public class AlertAnalysisService {
     }
 
     /**
-     * 构建 System Prompt - 定义 AI 角色和输出格式
+     * Builds the system prompt — defines the AI's role and output format.
      */
     private String buildSystemPrompt() {
         return """
@@ -307,7 +303,7 @@ public class AlertAnalysisService {
     }
 
     /**
-     * 构建 User Prompt - 填入告警信息和收集到的上下文
+     * Builds the user prompt — fills in the alert info and collected context.
      */
     private String buildUserPrompt(Incident incident, String metrics, String logs, String runbooks,
                                    String evidenceIndexPrompt) {
@@ -357,11 +353,11 @@ public class AlertAnalysisService {
     }
 
     /**
-     * 解析 LLM 的 JSON 输出并保存到 Incident
+     * Parses the LLM's JSON output and saves it to the Incident.
      */
     private void parseAndSaveAnalysis(Incident incident, String llmOutput, List<Evidence> evidenceList) {
         try {
-            // 清理可能的 markdown 代码块标记
+            // Strip any markdown code-fence wrappers.
             String cleanJson = llmOutput.trim();
             if (cleanJson.startsWith("```")) {
                 cleanJson = cleanJson.replaceAll("^```json\\s*", "").replaceAll("^```\\s*", "");
@@ -373,7 +369,7 @@ public class AlertAnalysisService {
             incident.setRootCauseHypothesis(json.path("root_cause_hypothesis").asText("Unknown"));
             incident.setAnalysisDetail(json.path("analysis_detail").asText(""));
 
-            // 把 suggested_actions 数组转成字符串
+            // Convert the suggested_actions array to a string.
             if (json.has("suggested_actions") && json.get("suggested_actions").isArray()) {
                 StringBuilder actions = new StringBuilder();
                 for (JsonNode action : json.get("suggested_actions")) {
@@ -384,12 +380,14 @@ public class AlertAnalysisService {
 
             incident.setConfidence(json.path("confidence").asDouble(0.0));
 
-            // 判别力字段（competing signals / evidence alignment）：
-            // 复合故障评估用，可量化"系统是否识别出并发信号并保持判别力"
+            // Discrimination fields (competing signals / evidence alignment):
+            // used by composite-fault evaluation to quantify whether the system
+            // recognized concurrent signals while keeping its discrimination.
             incident.setCompetingSignals(json.path("competing_signals_observed").toString());
             incident.setEvidenceAlignment(json.path("evidence_alignment").asText(""));
 
-            // v9 证据链可执行化：LLM 引用的 [E{n}] → 后端映射为真实查询 + 深链 URL
+            // v9 executable citations: resolve the [E{n}] indexes cited by the LLM
+            // to the real queries and deep links recorded by the backend.
             incident.setEvidenceCitations(buildEvidenceCitationsJson(llmOutput, evidenceList));
 
             log.info("Parsed analysis: confidence={}, rootCause={}",
@@ -397,7 +395,7 @@ public class AlertAnalysisService {
 
         } catch (Exception e) {
             log.error("Failed to parse LLM output as JSON: {}. Raw output: {}", e.getMessage(), llmOutput);
-            // Fallback: 把原始输出存到 analysis_detail
+            // Fallback: keep the raw output for human review.
             incident.setRootCauseHypothesis("Failed to parse structured output - see analysis_detail");
             incident.setAnalysisDetail(llmOutput);
             incident.setConfidence(0.3);

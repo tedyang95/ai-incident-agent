@@ -4,10 +4,11 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 /**
- * Incident 实体 - 存储每一条告警及其 AI 分析结果
- *
- * 对应面试中可以说的："I designed the incident data model with structured output
- * from LLM, including root cause hypothesis, confidence score, and suggested actions."
+ * Incident entity — persists each alert together with its AI analysis result.
+ * <p>
+ * The data model captures both the raw alert context (labels, timing) and the
+ * structured LLM output (root cause, confidence, suggested actions), plus
+ * evaluation artifacts (competing signals, evidence alignment, citations).
  */
 @Entity
 @Table(name = "incidents")
@@ -17,7 +18,7 @@ public class Incident {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 告警基本信息
+    // Alert metadata
     @Column(nullable = false, columnDefinition = "TEXT")
     private String alertname;
 
@@ -25,7 +26,7 @@ public class Incident {
     private String severity; // critical / warning / info
 
     @Column(nullable = false, columnDefinition = "TEXT")
-    private String service; // 哪个服务触发的
+    private String service; // the service that fired the alert
 
     @Column(columnDefinition = "TEXT")
     private String category; // availability / error-rate / latency / resource
@@ -34,9 +35,9 @@ public class Incident {
     private String description;
 
     @Column(columnDefinition = "TEXT")
-    private String labelsJson; // 完整的告警标签（JSON）
+    private String labelsJson; // full alert labels (JSON)
 
-    // 时间
+    // Timing
     @Column(nullable = false)
     private LocalDateTime receivedAt;
 
@@ -44,52 +45,54 @@ public class Incident {
 
     private LocalDateTime resolvedAt;
 
-    // AI 分析结果（结构化输出 structured output）
+    // AI analysis result (structured LLM output)
     @Column(columnDefinition = "TEXT")
-    private String rootCauseHypothesis; // 根因假设
+    private String rootCauseHypothesis; // root-cause hypothesis
 
     @Column(columnDefinition = "TEXT")
-    private String analysisDetail; // 详细分析
+    private String analysisDetail; // detailed analysis
 
     @Column(columnDefinition = "TEXT")
-    private String suggestedActions; // 建议的修复动作
+    private String suggestedActions; // suggested remediation actions
 
-    private Double confidence; // 置信度 0.0 - 1.0
-
-    @Column(columnDefinition = "TEXT")
-    private String relatedMetrics; // 相关指标摘要
+    private Double confidence; // 0.0 - 1.0
 
     @Column(columnDefinition = "TEXT")
-    private String relatedLogs; // 相关日志摘要
+    private String relatedMetrics; // collected metrics summary
 
     @Column(columnDefinition = "TEXT")
-    private String matchedRunbooks; // 匹配到的 runbook
+    private String relatedLogs; // collected logs summary
 
     @Column(columnDefinition = "TEXT")
-    private String contextSnapshot; // 喂给 LLM 的完整上下文快照（JSON，审计/grounding 验证用）
+    private String matchedRunbooks; // matched runbooks
 
-    // 判别力字段（复合故障评估用）：
-    // LLM 观察到的竞争信号（其他并发故障的迹象）与证据归属判断
     @Column(columnDefinition = "TEXT")
-    private String competingSignals; // JSON 数组：competing_signals_observed
+    private String contextSnapshot; // full context fed to the LLM (JSON; audit / grounding checks)
+
+    // Discrimination fields (composite-fault evaluation):
+    // concurrent signals the LLM observed, and how the evidence aligns with
+    // this alert's metric signature.
+    @Column(columnDefinition = "TEXT")
+    private String competingSignals; // JSON array: competing_signals_observed
 
     @Column(columnDefinition = "TEXT")
     private String evidenceAlignment; // consistent / conflicting / insufficient
 
-    // v9 证据链可执行化：LLM 引用编号 → 后端映射的真实查询 + 可点击深链 URL（JSON 数组）
-    // 每条：{index, source, query, summary, window, url, resolved}
-    // LLM 引用了不存在的编号 → resolved=false，不产生任何 query/url（无法伪造证据）
+    // v9 executable evidence citations: the LLM cites index numbers [E{n}], and
+    // the backend resolves them to the real executed queries + clickable deep links
+    // (JSON array). Invented indexes resolve to resolved=false with no query/url —
+    // the model cannot fabricate evidence.
     @Column(columnDefinition = "TEXT")
     private String evidenceCitations;
 
-    // 状态
+    // State
     @Enumerated(EnumType.STRING)
     private AnalysisStatus status; // PENDING / ANALYZING / COMPLETED / FAILED
 
     @Column(columnDefinition = "TEXT")
     private String errorMessage;
 
-    // LLM 调用追踪（tracing）
+    // LLM call tracing
     private String modelUsed;
     private Integer promptTokens;
     private Integer completionTokens;

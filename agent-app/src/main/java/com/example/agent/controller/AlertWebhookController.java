@@ -15,10 +15,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 告警 Webhook 控制器
- * 接收来自 Alertmanager 的告警通知，触发 AI 分析流程。
- *
- * Alertmanager webhook payload 格式参考：
+ * Alert webhook controller.
+ * <p>
+ * Receives alert notifications from Alertmanager and triggers the AI analysis
+ * pipeline. Payload format reference:
  * https://prometheus.io/docs/alerting/latest/configuration/#webhook_config
  */
 @RestController
@@ -33,7 +33,7 @@ public class AlertWebhookController {
     }
 
     /**
-     * 接收 Alertmanager webhook
+     * Receives an Alertmanager webhook.
      * POST /api/alert/webhook
      */
     @PostMapping("/webhook")
@@ -44,7 +44,7 @@ public class AlertWebhookController {
 
         List<Map<String, Object>> results = new ArrayList<>();
 
-        // Alertmanager 可能一次发多条告警
+        // Alertmanager may batch multiple alerts in a single webhook delivery.
         for (JsonNode alert : payload.path("alerts")) {
             try {
                 Incident incident = parseAlert(alert);
@@ -71,29 +71,29 @@ public class AlertWebhookController {
     }
 
     /**
-     * 解析单条 Alertmanager 告警为 Incident 实体
+     * Parses a single Alertmanager alert into an Incident entity.
      */
     private Incident parseAlert(JsonNode alert) {
         Incident incident = new Incident();
 
-        // 从 labels 提取
+        // Extract alert context from labels.
         JsonNode labels = alert.path("labels");
         incident.setAlertname(labels.path("alertname").asText("unknown"));
         incident.setSeverity(labels.path("severity").asText("warning"));
         incident.setService(labels.path("service").asText("unknown"));
         incident.setCategory(labels.path("category").asText("unknown"));
 
-        // 从 annotations 提取描述
+        // Extract the human-readable summary from annotations.
         JsonNode annotations = alert.path("annotations");
         incident.setDescription(
                 annotations.path("summary").asText("") + " | " +
                 annotations.path("description").asText("")
         );
 
-        // 完整标签存为 JSON
+        // Persist the full label set as JSON for auditability.
         incident.setLabelsJson(labels.toString());
 
-        // 时间
+        // Timing.
         String startsAt = alert.path("startsAt").asText(null);
         incident.setReceivedAt(LocalDateTime.now());
 
@@ -107,7 +107,7 @@ public class AlertWebhookController {
     }
 
     /**
-     * 手动触发测试告警（不需要 Alertmanager）
+     * Manually triggers a test alert without Alertmanager.
      * POST /api/alert/test
      */
     @PostMapping("/test")

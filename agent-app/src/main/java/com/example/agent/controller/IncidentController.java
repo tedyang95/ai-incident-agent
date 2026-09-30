@@ -11,9 +11,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 /**
- * Incident 查询 API - 供前端 dashboard 使用
- * GET /api/incidents          → 分页列表
- * GET /api/incidents/{id}     → 详情
+ * Incident query API — consumed by dashboards and external tooling.
+ * GET /api/incidents      → paginated list
+ * GET /api/incidents/{id} → single incident detail
  */
 @RestController
 @RequestMapping("/api/incidents")

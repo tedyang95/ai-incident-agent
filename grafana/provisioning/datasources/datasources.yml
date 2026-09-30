@@ -1,4 +1,4 @@
-# Grafana 数据源自动配置
+# Grafana datasource auto-provisioning
 apiVersion: 1
 
 datasources:

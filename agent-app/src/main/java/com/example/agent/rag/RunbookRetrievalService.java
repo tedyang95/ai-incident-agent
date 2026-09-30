@@ -14,15 +14,12 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Runbook 检索服务（RAG - Retrieval Augmented Generation）
- *
- * 当前实现：基于关键词的简单检索（keyword-based retrieval）
- * 未来升级：pgvector 向量检索（vector embedding），实现语义搜索
- *
- * 对应 AI 产品六层框架中的 L2: Grounded AI / RAG
- * 面试中可以说："I implemented a RAG system that retrieves relevant runbooks
- * based on alert context, starting with keyword-based retrieval and planning
- * to upgrade to pgvector semantic search."
+ * Runbook retrieval service (RAG — Retrieval Augmented Generation).
+ * <p>
+ * Current implementation: simple keyword-based retrieval over the runbook
+ * knowledge base. Future upgrade: pgvector vector embeddings for semantic search.
+ * <p>
+ * AI capability level: L2 Grounded AI / RAG.
  */
 @Service
 public class RunbookRetrievalService {
@@ -34,13 +31,13 @@ public class RunbookRetrievalService {
     private static final int MAX_CHARS_PER_RUNBOOK = 2000;
 
     /**
-     * 根据告警信息检索相关的 runbook
+     * Retrieves runbooks relevant to the given alert context.
      *
-     * @param alertname  告警名称
-     * @param service    服务名
-     * @param category   告警类别
-     * @param description 告警描述
-     * @return 匹配的 runbook 文本摘要
+     * @param alertname   alert name
+     * @param service     service name
+     * @param category    alert category
+     * @param description alert description
+     * @return a text summary of the top matching runbooks
      */
     public String retrieve(String alertname, String service, String category, String description) {
         List<Path> runbookFiles = listRunbookFiles();
@@ -48,23 +45,23 @@ public class RunbookRetrievalService {
             return "No runbooks found in " + RUNBOOKS_DIR + " directory.";
         }
 
-        // 构建搜索关键词
+        // Build the search keywords from the alert context.
         String searchText = (alertname + " " + service + " " + category + " " + description).toLowerCase();
         String[] keywords = searchText.split("\\s+");
 
-        // 简单评分：统计每个 runbook 中关键词出现的次数
+        // Simple scoring: count keyword occurrences per runbook.
         List<ScoredRunbook> scored = new ArrayList<>();
         for (Path file : runbookFiles) {
             try {
                 String content = Files.readString(file).toLowerCase();
                 int score = 0;
                 for (String keyword : keywords) {
-                    if (keyword.length() > 2) { // 忽略太短的词
+                    if (keyword.length() > 2) { // skip overly short tokens
                         int count = countOccurrences(content, keyword);
                         score += count;
                     }
                 }
-                // 标题匹配加分
+                // Bonus when the filename itself matches a keyword.
                 String filename = file.getFileName().toString().toLowerCase();
                 for (String keyword : keywords) {
                     if (keyword.length() > 2 && filename.contains(keyword)) {
@@ -84,7 +81,7 @@ public class RunbookRetrievalService {
             return "No matching runbooks found for: " + alertname + " / " + service;
         }
 
-        // 按分数排序，取前 N 个
+        // Rank by score, keep the top N.
         scored.sort(Comparator.comparingInt(ScoredRunbook::score).reversed());
 
         StringBuilder sb = new StringBuilder();

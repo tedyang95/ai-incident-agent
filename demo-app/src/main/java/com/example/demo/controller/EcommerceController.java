@@ -15,14 +15,16 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 电商 API 控制器
- * 正常业务接口 + 故障注入（fault injection）接口
- *
- * 故障注入接口用于触发告警，让 AI Agent 有真实场景可以分析：
- * - /admin/fail/error   → 开始抛 500 错误（触发 HighErrorRate 告警）
- * - /admin/fail/latency → 开始延迟飙升（触发 HighLatency 告警）
- * - /admin/fail/memory  → 开始内存泄漏（触发 HighMemoryUsage 告警）
- * - /admin/fail/stop    → 停止所有故障
+ * E-commerce API controller.
+ * <p>
+ * Exposes the normal business endpoints plus fault-injection endpoints used to
+ * trigger alerts so the AI agent has realistic scenarios to analyze:
+ * <ul>
+ *   <li>/admin/fail/error   → start returning 500s (triggers HighErrorRate)</li>
+ *   <li>/admin/fail/latency → inject 2-5s delays (triggers HighLatency)</li>
+ *   <li>/admin/fail/memory  → start a memory leak (triggers HighMemoryUsage)</li>
+ *   <li>/admin/fail/stop    → stop all active faults</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/api")
@@ -36,14 +38,14 @@ public class EcommerceController {
 
     public EcommerceController(FaultState faultState) {
         this.faultState = faultState;
-        // 初始化一些示例数据
+        // Seed some sample catalog data.
         products.put(1L, new Product(1L, "Laptop", 999.99, 50));
         products.put(2L, new Product(2L, "Phone", 699.99, 100));
         products.put(3L, new Product(3L, "Headphones", 199.99, 200));
     }
 
     // ============================================================
-    // 正常业务接口
+    // Business endpoints
     // ============================================================
 
     @GetMapping("/products")
@@ -112,8 +114,8 @@ public class EcommerceController {
     }
 
     // ============================================================
-    // 故障注入接口（Fault Injection）
-    // 用于触发告警，测试 AI Agent 的根因分析能力
+    // Fault-injection endpoints
+    // Used to trigger alerts and exercise the agent's root-cause analysis.
     // ============================================================
 
     @PostMapping("/admin/fail/error")
@@ -150,13 +152,13 @@ public class EcommerceController {
     }
 
     // ============================================================
-    // 内部方法
+    // Internals
     // ============================================================
 
     private void simulateLatencyIfEnabled() {
         if (faultState.isLatencyEnabled()) {
             try {
-                int delay = 2000 + random.nextInt(3000); // 2-5 秒
+                int delay = 2000 + random.nextInt(3000); // 2-5 s delay
                 log.debug("Latency fault: sleeping {}ms", delay);
                 Thread.sleep(delay);
             } catch (InterruptedException e) {

@@ -13,12 +13,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Loki 日志搜索工具服务
- * 作为 AI Agent 的 tool（工具调用），让 LLM 能搜索实时日志。
- *
- * 对应 AI 产品六层框架中的 L3: Tool-using AI
- * 面试中可以说："I integrated Loki log search as a tool function,
- * enabling the agent to correlate metrics with logs during incident triage."
+ * Loki log-search tool service.
+ * <p>
+ * Exposed to the LLM as a tool so the agent can correlate live logs with
+ * metrics during incident triage (AI capability level L3: Tool-using AI).
  */
 @Service
 public class LokiToolService {
@@ -42,14 +40,14 @@ public class LokiToolService {
     }
 
     /**
-     * 搜索日志，返回匹配的日志行
-     * 这是暴露给 LLM 的核心 tool function
+     * Searches logs and returns the matching lines.
+     * This is the core tool function exposed to the LLM.
      *
-     * @param service  服务名，用于过滤
-     * @param keyword  搜索关键词
-     * @param minutes  搜索最近多少分钟的日志
-     * @param limit    返回最大条数
-     * @return 日志文本摘要
+     * @param service the service to filter on
+     * @param keyword the search keyword
+     * @param minutes how many minutes of history to search
+     * @param limit   maximum number of lines to return
+     * @return a text summary of the matching logs
      */
     public String searchLogs(String service, String keyword, int minutes, int limit) {
         try {
@@ -116,19 +114,21 @@ public class LokiToolService {
     }
 
     /**
-     * 按锚定时间窗搜索日志（correlation window）
-     * 与告警触发时刻对齐：只查告警前 N 分钟到告警时刻的日志（根因发生在告警前），
-     * 避免"当前时间往前 N 分钟"的滑动窗口把相邻告警/上一故障的残留日志带进来。
+     * Searches logs within a correlation window anchored to the alert time.
+     * <p>
+     * Instead of a sliding window ending at "now", the query spans the minutes
+     * before the alert fired — root causes happen before the alert, and a
+     * sliding window would pull in stale logs from previous incidents.
      *
-     * @param service        服务名，用于过滤
-     * @param keyword        搜索关键词
-     * @param from           窗口起点（告警触发时刻 - N 分钟）
-     * @param to             窗口终点（告警触发时刻）
-     * @param limit          返回最大条数
-     * @param excludeKeyword 排除关键词（检索层过滤：LogQL `!=` 排除其他故障模式的
-     *                       特征信号，如非 error-rate 告警排除 "RuntimeException"，
-     *                       防止并发故障的异常堆栈污染本告警上下文）
-     * @return 日志文本摘要
+     * @param service        the service to filter on
+     * @param keyword        the search keyword
+     * @param from           window start (alert receivedAt - N minutes)
+     * @param to             window end (alert receivedAt)
+     * @param limit          maximum number of lines to return
+     * @param excludeKeyword keyword to exclude via LogQL {@code !=} (retrieval-layer
+     *                       discrimination: keeps concurrent fault signatures out of
+     *                       this alert's context)
+     * @return a text summary of the matching logs
      */
     public String searchLogsBetween(String service, String keyword, Instant from, Instant to, int limit, String excludeKeyword) {
         try {
@@ -199,15 +199,14 @@ public class LokiToolService {
     }
 
     /**
-     * 获取服务最近的错误日志（ERROR 级别）
-     * 用于告警分析时自动收集上下文
+     * Returns the most recent ERROR-level logs for a service.
      */
     public String getRecentErrors(String service, int minutes) {
         return searchLogs(service, "ERROR", minutes, 20);
     }
 
     /**
-     * 获取服务最近的异常堆栈（exception stack trace）
+     * Returns the most recent exception stack traces for a service.
      */
     public String getRecentExceptions(String service, int minutes) {
         return searchLogs(service, "Exception", minutes, 15);

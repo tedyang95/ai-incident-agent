@@ -1,4 +1,4 @@
-# Promtail 配置 - 采集 Docker 容器日志，发给 Loki
+# Promtail configuration — collects Docker container logs and ships them to Loki
 server:
   http_listen_port: 9080
   grpc_listen_port: 0

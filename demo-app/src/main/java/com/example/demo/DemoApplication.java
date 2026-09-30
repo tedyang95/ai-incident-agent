@@ -4,9 +4,10 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
- * Demo E-commerce Application
- * 被监控的示例应用，产生指标（metrics）和日志（logs）供 AI Agent 分析。
- * 包含故意设计的故障注入（fault injection）endpoint，用于触发告警。
+ * Demo e-commerce application.
+ * <p>
+ * The monitored sample service: it emits metrics and logs for the AI agent to
+ * analyze, and exposes deliberate fault-injection endpoints to trigger alerts.
  */
 @SpringBootApplication
 public class DemoApplication {

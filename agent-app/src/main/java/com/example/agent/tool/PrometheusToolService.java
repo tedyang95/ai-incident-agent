@@ -12,12 +12,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Prometheus 工具服务
- * 作为 AI Agent 的 tool（工具调用），让 LLM 能查询实时指标。
- *
- * 对应 AI 产品六层框架中的 L3: Tool-using AI
- * 面试中可以说："I implemented Prometheus query as an LLM tool function,
- * allowing the agent to retrieve real-time metrics during root cause analysis."
+ * Prometheus query tool service.
+ * <p>
+ * Exposed to the LLM as a tool so the agent can retrieve real-time metrics
+ * during root-cause analysis (AI capability level L3: Tool-using AI).
  */
 @Service
 public class PrometheusToolService {
@@ -41,11 +39,11 @@ public class PrometheusToolService {
     }
 
     /**
-     * 执行 PromQL 查询，返回指标当前值
-     * 这是暴露给 LLM 的核心 tool function
+     * Executes a PromQL query and returns the current values.
+     * This is the core tool function exposed to the LLM.
      *
-     * @param query PromQL 查询表达式，例如 "up{job='demo-app'}"
-     * @return 查询结果的文本摘要
+     * @param query the PromQL expression, e.g. {@code up{job='demo-app'}}
+     * @return a text summary of the query results
      */
     public String query(String query) {
         try {
@@ -98,8 +96,7 @@ public class PrometheusToolService {
     }
 
     /**
-     * 查询指定服务的关键指标概览
-     * 用于告警分析时自动收集上下文
+     * Fetches a key metrics overview for a service, used to build the analysis context.
      */
     public String getServiceOverview(String service) {
         // 每次 overview 开始重置查询记录（保证 EVIDENCE INDEX 只包含本次分析的真实查询）

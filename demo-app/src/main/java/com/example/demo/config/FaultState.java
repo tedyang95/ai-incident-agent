@@ -7,9 +7,10 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 故障状态管理（Fault State Manager）
- * 控制哪些故障注入（fault injection）当前处于激活状态。
- * 同时负责执行内存泄漏（memory leak）——持续分配内存不释放。
+ * Fault state manager.
+ * <p>
+ * Tracks which fault-injection modes are currently active and owns the
+ * memory-leak simulation (allocates memory without ever releasing it).
  */
 @Component
 public class FaultState {
@@ -18,7 +19,7 @@ public class FaultState {
     private final AtomicBoolean latencyEnabled = new AtomicBoolean(false);
     private final AtomicBoolean memoryLeakEnabled = new AtomicBoolean(false);
 
-    // 内存泄漏用：持有引用不释放
+    // Retains references so allocated memory is never released (memory-leak simulation).
     private final List<byte[]> memoryLeakHolder = new ArrayList<>();
 
     public boolean isErrorEnabled() {
@@ -65,21 +66,21 @@ public class FaultState {
     }
 
     /**
-     * 启动内存泄漏线程：每秒分配 10MB 内存且不释放
-     * 这会触发 JVM heap memory usage > 85% 的告警
+     * Starts a daemon thread that allocates ~10 MB of memory per second without
+     * releasing it, pushing JVM heap usage above the 85% alert threshold.
      */
     private void startMemoryLeak() {
         Thread leakThread = new Thread(() -> {
             while (memoryLeakEnabled.get()) {
                 try {
-                    // 每次分配 10MB
+                    // Allocate another 10 MB block.
                     memoryLeakHolder.add(new byte[10 * 1024 * 1024]);
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (OutOfMemoryError e) {
-                    // 内存溢出时停止，避免 JVM 崩溃
+                    // Stop on OOM to keep the JVM alive.
                     memoryLeakEnabled.set(false);
                     break;
                 }

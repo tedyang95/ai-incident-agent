@@ -1,7 +1,7 @@
 package com.example.demo.model;
 
 /**
- * 商品模型（Product model）
+ * Product entity as offered in the catalog.
  */
 public record Product(Long id, String name, double price, int stock) {
 }

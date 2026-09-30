@@ -1,5 +1,5 @@
-# Grafana 仪表盘自动配置（as-code）
-# 告诉 Grafana 从哪个目录加载 dashboard JSON 文件
+# Grafana dashboard auto-provisioning (as-code)
+# Tells Grafana which directory holds the dashboard JSON files
 apiVersion: 1
 
 providers:

@@ -1,20 +1,20 @@
-# Prometheus 配置 - 采集 demo-app 的指标
+# Prometheus configuration — scrapes metrics from the demo app
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
-# 告警规则文件
+# Alerting rule files
 rule_files:
   - "alert_rules.yml"
 
-# Alertmanager 地址
+# Alertmanager endpoint
 alerting:
   alertmanagers:
     - static_configs:
         - targets:
             - alertmanager:9093
 
-# 采集目标
+# Scrape targets
 scrape_configs:
   - job_name: "prometheus"
     static_configs:
