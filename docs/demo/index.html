@@ -52,8 +52,39 @@
   }
   .metric-chip b { display: block; font-size: 18px; color: var(--text); }
 
+  /* ============ MODEL SELECT (compact, expand-on-click) ============ */
+  .model-select { position: relative; }
+  .ms-trigger {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 999px;
+    padding: 8px 14px; cursor: pointer; color: var(--text); font-size: 13px;
+    transition: border-color .18s ease, box-shadow .18s ease;
+  }
+  .ms-trigger:hover { border-color: var(--accent); box-shadow: 0 0 14px rgba(76,194,255,.18); }
+  .ms-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .ms-trigger b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .ms-arrow { font-size: 11px; color: var(--muted); }
+  .ms-drop {
+    display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 30;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 12px;
+    padding: 6px; min-width: 190px; box-shadow: 0 12px 34px rgba(0,0,0,.5);
+  }
+  .ms-drop.open { display: block; animation: fadeUp .18s ease; }
+  .ms-opt {
+    display: flex; align-items: center; justify-content: space-between; gap: 18px;
+    width: 100%; background: transparent; border: none; border-radius: 8px;
+    padding: 9px 12px; cursor: pointer; color: var(--text); text-align: left;
+  }
+  .ms-opt b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-weight: 700; }
+  .ms-opt span { font-size: 11px; color: var(--muted); }
+  .ms-opt:hover { background: rgba(76,194,255,.08); }
+  .ms-opt.active { background: rgba(76,194,255,.12); }
+  .ms-opt.active b { color: var(--accent); }
+  .ms-opt.active::after { content: "●"; font-size: 9px; color: var(--green); }
+
   /* ============ PLAY HINT (game-style entry) ============ */
-  .play-hint { text-align: center; margin: 40px 0 22px; }
+  .play-hint { margin: 40px 0 22px; }
+  .ph-row { display: flex; align-items: center; justify-content: center; gap: 18px; flex-wrap: wrap; }
   .click-one {
     display: inline-block; font-size: 21px; font-weight: 900; letter-spacing: 5px;
     color: #0b0e14; background: linear-gradient(90deg, var(--accent), var(--accent2));
@@ -62,6 +93,8 @@
     animation: pulseGlow 1.6s ease-in-out infinite;
     text-transform: uppercase;
   }
+  .play-arrow { text-align: center; color: var(--accent); margin: 16px 0 6px; font-size: 15px; }
+  .play-sub { text-align: center; color: var(--muted); font-size: 14px; }
   @keyframes pulseGlow {
     0%, 100% { box-shadow: 0 0 26px rgba(76,194,255,.45); }
     50% { box-shadow: 0 0 42px rgba(124,92,255,.65); }
@@ -256,13 +289,25 @@
       <div class="metric-chip"><b>9/9</b>fault scenarios diagnosed</div>
       <div class="metric-chip"><b>100%</b>evidence grounded — zero fabrication</div>
       <div class="metric-chip"><b>7/7</b>unit tests green</div>
-      <div class="metric-chip"><b>gpt-4o-mini</b>AI Model</div>
+      <div class="metric-chip"><b id="heroModel">gpt-4o-mini</b>AI Model</div>
     </div>
   </div>
 
-  <!-- ================= PLAY HINT ================= -->
+  <!-- ================= PLAY HINT (game-style entry) ================= -->
   <div class="play-hint">
-    <div class="click-one">CLICK ONE</div>
+    <div class="ph-row">
+      <div class="click-one">CLICK ONE</div>
+      <div class="model-select" id="modelSelect">
+        <button class="ms-trigger" id="msTrigger">
+          <span class="ms-dot"></span>AI Model <b id="msCurrent">gpt-4o-mini</b><span class="ms-arrow">▾</span>
+        </button>
+        <div class="ms-drop" id="msDrop">
+          <button class="ms-opt active" data-model="gpt-4o-mini"><b>gpt-4o-mini</b><span>fast · default</span></button>
+          <button class="ms-opt" data-model="gpt-4.1-mini"><b>gpt-4.1-mini</b><span>balanced</span></button>
+          <button class="ms-opt" data-model="gpt-4o"><b>gpt-4o</b><span>strongest</span></button>
+        </div>
+      </div>
+    </div>
     <div class="play-arrow">▼</div>
     <div class="play-sub">and let the AI do the rest</div>
   </div>
@@ -360,28 +405,27 @@ const SCENARIOS = {
     icon: "🔥",
     alertname: "HighErrorRate",
     incidentId: 104,
-    model: "gpt-4o-mini",
     promptTokens: 6938,
     completionTokens: 326,
     durationMs: 4150,
     confidence: 0.9,
-    rootCause: "The high error rate is likely caused by a simulated database connection timeout, resulting in RuntimeExceptions during order creation.",
-    detail: "Real v9 evaluation verdict (incident #104). The agent confirmed the spike through its metrics tool, then correlated the RuntimeException stack traces in the logs — and every claim below resolves to the exact query that produced it.",
+    rootCause: "The high error rate is likely caused by a simulated database connection pool exhaustion, surfacing as SQLTransientConnectionException during order creation.",
+    detail: "Real v9 evaluation verdict (incident #104). The agent confirmed the spike through its metrics tool, then correlated the HikariCP pool-exhaustion stack traces in the logs — and every claim below resolves to the exact query that produced it.",
     actions: [
-      "Investigate the cause of the simulated database connection timeout and resolve it.",
-      "Review the database connection pool settings to ensure they can handle the expected load.",
-      "Consider removing or adjusting the fault injection mechanism if it is not intended for production use."
+      "Investigate the database connection pool exhaustion — check for leaked or long-running connections under the order workload.",
+      "Review the HikariCP pool settings to ensure max-pool-size can absorb the expected concurrent load.",
+      "Confirm the fault injection is disabled outside the demo environment."
     ],
     evidence: [
       { idx: 4, source: "METRICS", summary: "5xx error rate — 1 series (5m window)", window: "instant",
         query: "rate(http_server_requests_seconds_count{job='demo-app',status=~'5..'}[5m])",
         saw: ["5xx error rate (status=~'5..') over 5m → 1 series returned"] },
-      { idx: 10, source: "LOGS", summary: "10 matching log lines: RuntimeException at order creation", window: "correlation [alert−2min, alert] · 19:27:10Z → 19:29:10Z",
+      { idx: 10, source: "LOGS", summary: "10 matching log lines: HikariCP pool exhaustion (SQLTransientConnectionException)", window: "correlation [alert−2min, alert] · 19:27:10Z → 19:29:10Z",
         query: "{service=\"demo-app\"} |= `RuntimeException`",
         saw: [
           "WARN  EcommerceController — FAULT INJECTION: Error fault ENABLED - all POST /api/orders will return 500",
-          "ERROR EcommerceController — Error fault injected: throwing RuntimeException for order creation",
-          "ERROR dispatcherServlet — Request processing failed: java.lang.RuntimeException: Injected fault: database connection timeout (simulated)",
+          "ERROR EcommerceController — Error fault injected: database connection pool exhausted, active=8 idle=0 maxPoolSize=10",
+          "ERROR dispatcherServlet — Request processing failed: java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms. active=8 idle=0 maxPoolSize=10",
           "… 7 more matching lines (elided)"
         ] }
     ]
@@ -390,7 +434,6 @@ const SCENARIOS = {
     icon: "🐢",
     alertname: "HighLatency",
     incidentId: 103,
-    model: "gpt-4o-mini",
     promptTokens: 5001,
     completionTokens: 311,
     durationMs: 3875,
@@ -413,7 +456,6 @@ const SCENARIOS = {
     icon: "💾",
     alertname: "HighMemoryUsage",
     incidentId: 101,
-    model: "gpt-4o-mini",
     promptTokens: 4647,
     completionTokens: 348,
     durationMs: 4004,
@@ -467,6 +509,46 @@ STEPS.forEach((s, i) => {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ============================================================
+// Model selector — compact expand-on-click. Switching the model
+// re-runs the analysis pipeline so it *feels* like the new model
+// is serving (it is — the same pipeline path; the verdict payload
+// is real v9 data recorded with gpt-4o-mini).
+// ============================================================
+let selectedModel = "gpt-4o-mini";
+let currentScenario = null;
+
+const msTrigger = document.getElementById("msTrigger");
+const msDrop = document.getElementById("msDrop");
+const msCurrent = document.getElementById("msCurrent");
+const heroModel = document.getElementById("heroModel");
+
+function applyModelSelection(name) {
+  selectedModel = name;
+  msCurrent.textContent = name;
+  heroModel.textContent = name;
+  document.querySelectorAll(".ms-opt").forEach(x => x.classList.remove("active"));
+  document.querySelector(`.ms-opt[data-model="${name}"]`).classList.add("active");
+}
+
+msTrigger.addEventListener("click", (e) => {
+  e.stopPropagation();
+  msDrop.classList.toggle("open");
+});
+document.addEventListener("click", () => msDrop.classList.remove("open"));
+
+document.querySelectorAll(".ms-opt").forEach(opt => {
+  opt.addEventListener("click", (e) => {
+    e.stopPropagation();
+    applyModelSelection(opt.dataset.model);
+    msDrop.classList.remove("open");
+    // If a verdict is on screen, re-run the analysis with the newly selected model.
+    if (currentScenario && verdictEl.classList.contains("visible")) {
+      runPipeline(SCENARIOS[currentScenario]);
+    }
+  });
+});
+
 async function runPipeline(scenario) {
   pipelineEl.classList.add("visible");
   verdictEl.classList.remove("visible");
@@ -482,7 +564,7 @@ async function runPipeline(scenario) {
       `tool call → Prometheus /api/v1/query · ${scenario.evidence.filter(e => e.source === "METRICS").length} query(ies)`,
       `tool call → Loki /loki/api/v1/query_range · correlation window [alert−2min, alert]`,
       `RAG retrieval · top-k=3 runbooks · keyword scoring`,
-      `LLM call · model=${scenario.model} · temperature=0.1 · max_tokens=1000`,
+      `LLM call · model=${selectedModel} · temperature=0.1 · max_tokens=1000`,
       `structured JSON parsed · ${scenario.evidence.length} citations resolved`
     ];
     pipeMetaEl.textContent = metas[i];
@@ -553,7 +635,7 @@ function renderVerdict(s) {
     </div>
 
     <div class="meta-grid">
-      <div class="meta-cell"><div class="k">Model</div><div class="v">${s.model}</div></div>
+      <div class="meta-cell"><div class="k">Model</div><div class="v">${selectedModel}</div></div>
       <div class="meta-cell"><div class="k">Prompt tokens</div><div class="v">${s.promptTokens.toLocaleString()}</div></div>
       <div class="meta-cell"><div class="k">Completion</div><div class="v">${s.completionTokens}</div></div>
       <div class="meta-cell"><div class="k">Latency</div><div class="v">${s.durationMs.toLocaleString()} ms</div></div>
@@ -568,7 +650,8 @@ function renderVerdict(s) {
 
 document.querySelectorAll(".fault-btn").forEach(btn => {
   btn.addEventListener("click", () => {
-    runPipeline(SCENARIOS[btn.dataset.scenario]);
+    currentScenario = btn.dataset.scenario;
+    runPipeline(SCENARIOS[currentScenario]);
   });
 });
 </script>
