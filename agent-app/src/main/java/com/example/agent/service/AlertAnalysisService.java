@@ -123,29 +123,27 @@ public class AlertAnalysisService {
         log.debug("Metrics collected: {} chars", metrics.length());
 
         // 1b. Loki log search driven by the alert category, within a correlation window.
-        //     Retrieval discrimination:
-        //     - latency keywords use only fault-injection markers (sleeping /
-        //       "Latency fault"), dropping the generic "timeout" (a concurrent
-        //       error's message "database connection timeout" would match it)
-        //     - non-error-rate alerts exclude "RuntimeException" at the LogQL layer
-        //       (concurrent error stack traces never enter this alert's context)
+        //     CATEGORY-SCOPED RETRIEVAL (v12): each alert class only queries ITS OWN
+        //     fault markers as log-entry keywords. Latency/resource alerts no longer
+        //     query generic "ERROR"/"Exception" — concurrent faults' stack traces
+        //     (e.g. SQLTransientConnectionException, downstream timeouts) never enter
+        //     this alert's context, so the LLM cannot be pulled toward them.
+        //     error-rate keeps the generic entries because its root cause IS an
+        //     exception type.
         Instant alertInstant = incident.getReceivedAt().toInstant(ZoneOffset.UTC);
         Instant logFrom = alertInstant.minus(2, ChronoUnit.MINUTES);
         Set<String> keywords = new LinkedHashSet<>();
-        keywords.add("ERROR");
-        keywords.add("Exception");
         String cat = incident.getCategory() == null ? "" : incident.getCategory();
-        String excludeKeyword = "error-rate".equals(cat) ? null : "RuntimeException";
         switch (cat) {
             case "latency" -> keywords.addAll(List.of("sleeping", "Latency fault"));
             case "resource" -> keywords.addAll(List.of("OutOfMemory", "memory"));
-            case "error-rate" -> keywords.addAll(List.of("RuntimeException"));
-            default -> { }
+            case "error-rate" -> keywords.addAll(List.of("ERROR", "Exception", "RuntimeException"));
+            default -> keywords.addAll(List.of("ERROR", "Exception"));
         }
         StringBuilder logsBuilder = new StringBuilder();
         for (String kw : keywords) {
             logsBuilder.append(lokiTool.searchLogsBetween(
-                    incident.getService(), kw, logFrom, alertInstant, 10, excludeKeyword)).append("\n");
+                    incident.getService(), kw, logFrom, alertInstant, 10, null)).append("\n");
         }
         String logs = logsBuilder.toString();
         incident.setRelatedLogs(truncate(logs, 2000));
@@ -258,31 +256,48 @@ public class AlertAnalysisService {
                 Rules:
                 1. Base your analysis ONLY on the provided context (metrics, logs, runbooks).
                 2. If the evidence is insufficient, say so explicitly and give a confidence score below 0.5.
+                   A HEALTHY conclusion is an insufficient-evidence outcome, not a confirmed
+                   diagnosis: if this alert's metric signature shows no anomaly and no
+                   matching logs exist, state "no anomaly detected" and set confidence <= 0.5
+                   with evidence_strength "weak" or "insufficient" — never report a
+                   high-confidence diagnosis for a healthy service.
                 3. Distinguish between "what the data shows" and "your hypothesis".
                 4. Provide concrete, actionable remediation steps, not generic advice.
                 5. Output MUST be valid JSON with the exact fields specified.
                 6. EVIDENCE CITATION (MANDATORY): In root_cause_hypothesis, you MUST quote
                    at least one exact metric value from the METRICS section (format:
-                   [metric: <name> = <value>]) AND at least one exact log line from the
-                   LOGS section (format: [log: "<exact line>"]). NEVER write a root cause
-                   with no concrete numbers or log quotes. Generic answers like "memory leak
-                   or excessive memory consumption by the application" are UNACCEPTABLE.
+                   [metric: <name> = <value>]). For log evidence, ONLY quote log lines that
+                   belong to THIS alert's fault class. If the LOGS section contains no log
+                   lines matching this alert's metric signature, state "No logs matching
+                   this alert's signature were found" and rely on metric evidence alone —
+                   NEVER quote an unrelated ERROR log just to satisfy a citation quota.
                 7. CONFIDENCE CALIBRATION: confidence must match how much quoted evidence
-                   you cite: 0.7-0.9 = confirmed by metric AND log evidence; 0.5-0.6 = partial
-                   evidence; 0.2-0.4 = weak/indirect evidence; below 0.2 = no evidence.
-                   evidence_strength must be consistent: strong = quoted metric + log,
-                   moderate = one quoted piece, weak/insufficient = none.
+                   you cite: 0.7-0.9 = this alert's own metric signature is clearly
+                   abnormal AND, if present, its own fault-class logs confirm it;
+                   0.5-0.6 = partial evidence; 0.2-0.4 = weak/indirect evidence; below
+                   0.2 = no evidence. evidence_strength must be consistent: strong =
+                   abnormal metric + confirming logs (when they exist), moderate = one
+                   quoted piece, weak/insufficient = none.
                 8. DISCRIMINATION AGAINST CONCURRENT SIGNALS (CRITICAL): The retrieved
                    context MAY contain evidence from OTHER, concurrent incidents — this is
-                   expected in production. Before concluding:
-                   a. Identify signals that do NOT match THIS alert's metric signature.
-                      Metric signature means: error-rate alerts are driven by error rate /
-                      5xx counts; latency alerts by p99/avg latency; memory alerts by JVM
-                      heap usage. Evidence that does NOT move THIS alert's metric belongs
-                      to a different fault mode.
-                   b. Report such signals in competing_signals_observed. Do NOT let them
-                      become your primary root cause.
-                   c. If competing signals cannot be fully excluded, cap confidence at 0.5
+                   expected in production. Your root cause MUST be driven by THIS alert's
+                   own metric signature:
+                   - HighErrorRate: error rate / 5xx counts drive it; logs identify the
+                     exception type.
+                   - HighLatency: p99 / avg latency drives it. ONLY latency fault markers
+                     in logs (e.g. "sleeping", "Latency fault") may confirm it. ERROR logs
+                     about 5xx, connection pool, or downstream timeouts are ALWAYS
+                     competing signals for a latency alert — report them in
+                     competing_signals_observed and NEVER make them the root cause, even
+                     if they plausibly explain the slowness.
+                   - HighMemoryUsage: JVM heap / memory metrics drive it. ONLY memory
+                     markers in logs (e.g. "OutOfMemory") may confirm it. 5xx / downstream
+                     ERROR logs are ALWAYS competing signals for a memory alert — report
+                     them in competing_signals_observed and NEVER make them the root cause.
+                   a. Identify signals that do NOT match THIS alert's metric signature and
+                      report them in competing_signals_observed. Do NOT let them become
+                      your primary root cause.
+                   b. If competing signals cannot be fully excluded, cap confidence at 0.5
                       and set evidence_alignment to "conflicting".
                 9. REASONING ORDER: work through 3 steps explicitly in analysis_detail —
                    (1) evidence most relevant to THIS alert's metric signature;
@@ -338,9 +353,10 @@ public class AlertAnalysisService {
                 === YOUR TASK ===
                 Analyze this alert and provide a structured root cause analysis in JSON format.
                 MANDATORY: quote at least one exact metric value (format: [metric: <name> = <value>])
-                and at least one exact log line (format: [log: "<exact line>"]) inside
-                root_cause_hypothesis or analysis_detail. Analysis without any quoted metric
-                or log evidence will be treated as weak evidence (confidence <= 0.4).
+                inside root_cause_hypothesis or analysis_detail. Quote log lines ONLY if they
+                belong to THIS alert's fault class; otherwise state that no matching logs were
+                found. Analysis without any quoted metric will be treated as weak evidence
+                (confidence <= 0.4).
                 MANDATORY: every evidence reference must cite its EVIDENCE INDEX number as [E{n}]
                 next to the quoted value/log line. NEVER invent index numbers — only [E{n}]
                 from the EVIDENCE INDEX exist, and invented ones cannot be resolved.

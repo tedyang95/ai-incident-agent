@@ -22,9 +22,10 @@ echo "time,fault,incident_id,alertname,status,confidence,prompt_tokens,completio
 # fault -> expected alert name
 alertname_for() {
   case $1 in
-    error)   echo "HighErrorRate" ;;
-    latency) echo "HighLatency" ;;
-    memory)  echo "HighMemoryUsage" ;;
+    error)      echo "HighErrorRate" ;;
+    latency)    echo "HighLatency" ;;
+    memory)     echo "HighMemoryUsage" ;;
+    downstream) echo "HighErrorRate" ;;  # 502 counts into 5xx -> same alert name, different root cause class
   esac
 }
 
@@ -77,8 +78,9 @@ run_case() {
   # generate traffic (error/latency need metrics; memory is allocated by the internal thread)
   for f in "${faults[@]}"; do
     case $f in
-      error)   (for i in $(seq 1 200); do curl -s -o /dev/null -X POST -H "Content-Type: application/json" -d '{"productId":1,"quantity":1}' http://localhost:8080/api/orders; sleep 0.3; done) & ;;
-      latency) (for i in $(seq 1 60); do curl -s -o /dev/null http://localhost:8080/api/products; sleep 0.2; done) & ;;
+      error)      (for i in $(seq 1 200); do curl -s -o /dev/null -X POST -H "Content-Type: application/json" -d '{"productId":1,"quantity":1}' http://localhost:8080/api/orders; sleep 0.3; done) & ;;
+      latency)    (for i in $(seq 1 60); do curl -s -o /dev/null http://localhost:8080/api/products; sleep 0.2; done) & ;;
+      downstream) (for i in $(seq 1 100); do curl -s -o /dev/null -X POST -H "Content-Type: application/json" -d '{"productId":1,"quantity":1}' http://localhost:8080/api/orders; sleep 0.5; done) & ;;
     esac
   done
 
@@ -122,11 +124,60 @@ run_case() {
   sleep 5  # give alerts a little time to settle back
 }
 
-# single-fault baselines (error ~90s / latency ~90s / memory ~4-6min)
+# --- healthy baseline: no fault injected; synthetic alert; agent must NOT invent a root cause ---
+run_healthy() {
+  local wait_seconds=$1
+  settle
+  local start_id
+  start_id=$(docker exec postgres psql -U agent -d incident_agent -t -c "SELECT COALESCE(MAX(id),0) FROM incidents;" | tr -d ' \n')
+  echo ">>> [healthy-baseline] sending synthetic alert (no fault injected)"
+  curl -s -X POST "http://localhost:8081/api/alert/test?alertname=HealthyCheck&severity=warning&service=demo-app" > /dev/null
+  local waited=0
+  while [ $waited -lt $wait_seconds ]; do
+    local cnt
+    cnt=$(docker exec postgres psql -U agent -d incident_agent -t -c \
+      "SELECT count(*) FROM incidents WHERE id > $start_id AND alertname='HealthyCheck' AND status='COMPLETED';" 2>/dev/null | tr -d ' \n')
+    [ "$cnt" != "0" ] && break
+    sleep 10; waited=$((waited+10))
+  done
+  local row
+  row=$(docker exec postgres psql -U agent -d incident_agent -t -c \
+    "SELECT id||'|'||alertname||'|'||status||'|'||coalesce(confidence,0)||'|'||coalesce(prompt_tokens,0)||'|'||coalesce(completion_tokens,0)||'|'||coalesce(analysis_duration_ms,0)||'|'||replace(coalesce(root_cause_hypothesis,''),'|',' ') FROM incidents WHERE id > $start_id AND alertname='HealthyCheck' AND status='COMPLETED' ORDER BY id DESC LIMIT 1;" 2>/dev/null | tr -d ' \t')
+  if [ -n "$row" ]; then
+    echo "$(date +%H:%M:%S),healthy-baseline,$row" >> "$OUT"
+    echo ">>> [healthy-baseline] DONE → $row"
+  else
+    echo "$(date +%H:%M:%S),healthy-baseline,TIMEOUT,,,,,," >> "$OUT"
+    echo ">>> [healthy-baseline] TIMEOUT"
+  fi
+}
+
+# --- staggered temporal case: fault1 runs to completion (leaves logs in Loki),
+#     then fault2 runs immediately so its analysis window contains the stale logs ---
+run_staggered() {
+  local first=$1 second=$2 wait=$3
+  echo ">>> [staggered $first → $second] phase 1: $first"
+  run_case "$first" "$wait"
+  echo ">>> [staggered $first → $second] phase 2: $second (stale logs from $first still in Loki window)"
+  run_case "$second" "$wait"
+}
+
+# control + temporal cases (full suite only)
+if [ "$MODE" = "all" ]; then
+  # healthy-baseline runs FIRST on a clean environment: a "no fault" control must
+  # not see leftover evidence from earlier cases (Prometheus rate()[5m] window and
+  # the Loki correlation window would still hold the previous fault's traces).
+  run_healthy 180
+  run_staggered error latency 420
+  run_staggered downstream error 420
+fi
+
+# single-fault baselines (error ~90s / latency ~90s / memory ~4-6min / downstream ~2-3min)
 if [ "$MODE" != "composite" ]; then
   run_case error 180
   run_case latency 180
   run_case memory 420
+  run_case downstream 240
 fi
 
 # composite faults (discrimination matrix: two alerts analyzed independently, each hits its own root cause)
@@ -134,6 +185,8 @@ if [ "$MODE" != "single" ]; then
   run_case error+latency 420
   run_case latency+memory 600
   run_case error+memory 600
+  run_case downstream+latency 420
+  run_case downstream+memory 600
 fi
 
 echo "=== ALL DONE, results in: $OUT ==="

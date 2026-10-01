@@ -7,9 +7,20 @@
       "id": "case-001",
       "fault": "error",
       "alert_expected": "HighErrorRate",
-      "inject": { "method": "POST", "url": "/api/admin/fail/error" },
-      "traffic": { "type": "POST /api/orders", "note": "orders endpoint throws RuntimeException and returns 500 in error mode" },
-      "expected_root_cause_keywords": ["api/orders", "runtimeexception", "500", "error rate"],
+      "inject": {
+        "method": "POST",
+        "url": "/api/admin/fail/error"
+      },
+      "traffic": {
+        "type": "POST /api/orders",
+        "note": "orders endpoint throws RuntimeException and returns 500 in error mode"
+      },
+      "expected_root_cause_keywords": [
+        "api/orders",
+        "runtimeexception",
+        "500",
+        "error rate"
+      ],
       "expected_category": "error-rate",
       "expected_confidence_min": 0.5
     },
@@ -17,9 +28,21 @@
       "id": "case-002",
       "fault": "latency",
       "alert_expected": "HighLatency",
-      "inject": { "method": "POST", "url": "/api/admin/fail/latency" },
-      "traffic": { "type": "GET /api/products", "note": "all requests sleep 2-5s, so p99 necessarily exceeds the 1s threshold" },
-      "expected_root_cause_keywords": ["latency", "delay", "slow", "p99", "sleep"],
+      "inject": {
+        "method": "POST",
+        "url": "/api/admin/fail/latency"
+      },
+      "traffic": {
+        "type": "GET /api/products",
+        "note": "all requests sleep 2-5s, so p99 necessarily exceeds the 1s threshold"
+      },
+      "expected_root_cause_keywords": [
+        "latency",
+        "delay",
+        "slow",
+        "p99",
+        "sleep"
+      ],
       "expected_category": "latency",
       "expected_confidence_min": 0.5
     },
@@ -27,53 +50,317 @@
       "id": "case-003",
       "fault": "memory",
       "alert_expected": "HighMemoryUsage",
-      "inject": { "method": "POST", "url": "/api/admin/fail/memory" },
-      "traffic": { "type": "none", "note": "FaultState internal thread allocates 10MB per second without releasing, triggering G1 Old Gen > 85%" },
-      "expected_root_cause_keywords": ["memory", "heap", "leak", "old gen", "allocation"],
+      "inject": {
+        "method": "POST",
+        "url": "/api/admin/fail/memory"
+      },
+      "traffic": {
+        "type": "none",
+        "note": "FaultState internal thread allocates 10MB per second without releasing, triggering G1 Old Gen > 85%"
+      },
+      "expected_root_cause_keywords": [
+        "memory",
+        "heap",
+        "leak",
+        "old gen",
+        "allocation"
+      ],
       "expected_category": "resource",
       "expected_confidence_min": 0.5
     },
     {
       "id": "case-004",
       "fault": "composite-error-latency",
-      "alerts_expected": ["HighErrorRate", "HighLatency"],
-      "inject": { "method": "POST", "urls": ["/api/admin/fail/error", "/api/admin/fail/latency"] },
-      "traffic": { "type": "POST /api/orders + GET /api/products", "note": "two faults injected simultaneously: error returns 500, latency sleeps all requests 2-5s" },
-      "expected_root_cause_keywords": {
-        "HighErrorRate": ["api/orders", "runtimeexception", "500", "error rate"],
-        "HighLatency": ["latency", "delay", "slow", "p99", "sleep"]
+      "alerts_expected": [
+        "HighErrorRate",
+        "HighLatency"
+      ],
+      "inject": {
+        "method": "POST",
+        "urls": [
+          "/api/admin/fail/error",
+          "/api/admin/fail/latency"
+        ]
       },
-      "expected_categories": { "HighErrorRate": "error-rate", "HighLatency": "latency" },
+      "traffic": {
+        "type": "POST /api/orders + GET /api/products",
+        "note": "two faults injected simultaneously: error returns 500, latency sleeps all requests 2-5s"
+      },
+      "expected_root_cause_keywords": {
+        "HighErrorRate": [
+          "api/orders",
+          "runtimeexception",
+          "500",
+          "error rate"
+        ],
+        "HighLatency": [
+          "latency",
+          "delay",
+          "slow",
+          "p99",
+          "sleep"
+        ]
+      },
+      "expected_categories": {
+        "HighErrorRate": "error-rate",
+        "HighLatency": "latency"
+      },
       "expected_confidence_min": 0.5,
       "evaluation_note": "discrimination: both independent root causes must be identified. The HighErrorRate incident must hit the error keywords (not be pulled toward latency by the p99 spike); the HighLatency incident must hit the latency keywords (not be pulled toward error by 500/RuntimeException logs)"
     },
     {
       "id": "case-005",
       "fault": "composite-latency-memory",
-      "alerts_expected": ["HighLatency", "HighMemoryUsage"],
-      "inject": { "method": "POST", "urls": ["/api/admin/fail/latency", "/api/admin/fail/memory"] },
-      "traffic": { "type": "GET /api/products", "note": "latency request delays and the memory leak thread occur at the same time" },
-      "expected_root_cause_keywords": {
-        "HighLatency": ["latency", "delay", "slow", "p99", "sleep"],
-        "HighMemoryUsage": ["memory", "heap", "leak", "old gen", "allocation"]
+      "alerts_expected": [
+        "HighLatency",
+        "HighMemoryUsage"
+      ],
+      "inject": {
+        "method": "POST",
+        "urls": [
+          "/api/admin/fail/latency",
+          "/api/admin/fail/memory"
+        ]
       },
-      "expected_categories": { "HighLatency": "latency", "HighMemoryUsage": "resource" },
+      "traffic": {
+        "type": "GET /api/products",
+        "note": "latency request delays and the memory leak thread occur at the same time"
+      },
+      "expected_root_cause_keywords": {
+        "HighLatency": [
+          "latency",
+          "delay",
+          "slow",
+          "p99",
+          "sleep"
+        ],
+        "HighMemoryUsage": [
+          "memory",
+          "heap",
+          "leak",
+          "old gen",
+          "allocation"
+        ]
+      },
+      "expected_categories": {
+        "HighLatency": "latency",
+        "HighMemoryUsage": "resource"
+      },
       "expected_confidence_min": 0.5,
       "evaluation_note": "discrimination: the HighLatency incident must hit the latency keywords (not pulled by the heap spike); the HighMemoryUsage incident must hit the memory keywords (not pulled by sleeping logs)"
     },
     {
       "id": "case-006",
       "fault": "composite-error-memory",
-      "alerts_expected": ["HighErrorRate", "HighMemoryUsage"],
-      "inject": { "method": "POST", "urls": ["/api/admin/fail/error", "/api/admin/fail/memory"] },
-      "traffic": { "type": "POST /api/orders", "note": "error returns 500 and the memory leak thread occurs at the same time" },
-      "expected_root_cause_keywords": {
-        "HighErrorRate": ["api/orders", "runtimeexception", "500", "error rate"],
-        "HighMemoryUsage": ["memory", "heap", "leak", "old gen", "allocation"]
+      "alerts_expected": [
+        "HighErrorRate",
+        "HighMemoryUsage"
+      ],
+      "inject": {
+        "method": "POST",
+        "urls": [
+          "/api/admin/fail/error",
+          "/api/admin/fail/memory"
+        ]
       },
-      "expected_categories": { "HighErrorRate": "error-rate", "HighMemoryUsage": "resource" },
+      "traffic": {
+        "type": "POST /api/orders",
+        "note": "error returns 500 and the memory leak thread occurs at the same time"
+      },
+      "expected_root_cause_keywords": {
+        "HighErrorRate": [
+          "api/orders",
+          "runtimeexception",
+          "500",
+          "error rate"
+        ],
+        "HighMemoryUsage": [
+          "memory",
+          "heap",
+          "leak",
+          "old gen",
+          "allocation"
+        ]
+      },
+      "expected_categories": {
+        "HighErrorRate": "error-rate",
+        "HighMemoryUsage": "resource"
+      },
       "expected_confidence_min": 0.5,
       "evaluation_note": "discrimination: the HighErrorRate incident must hit the error keywords (not pulled by the heap spike); the HighMemoryUsage incident must hit the memory keywords (not pulled by 500 logs)"
+    },
+    {
+      "id": "case-007",
+      "fault": "downstream",
+      "alert_expected": "HighErrorRate",
+      "inject": {
+        "method": "POST",
+        "url": "/api/admin/fail/downstream"
+      },
+      "traffic": {
+        "type": "POST /api/orders",
+        "note": "createOrder calls the simulated payment-service; it times out after 3000ms -> 502 Bad Gateway, counted into 5xx -> fires HighErrorRate"
+      },
+      "expected_root_cause_keywords": [
+        "downstream",
+        "payment",
+        "upstream",
+        "timeout",
+        "502",
+        "bad gateway"
+      ],
+      "expected_category": "error-rate",
+      "expected_confidence_min": 0.5,
+      "evaluation_note": "same alert name as case-001 but a DIFFERENT root-cause class: the symptom (5xx) is local, the cause is the downstream dependency. Must NOT diagnose pool exhaustion / RuntimeException. Logs show the call chain: 'Calling payment-service' then 'payment-service request timed out'."
+    },
+    {
+      "id": "case-008",
+      "fault": "composite-downstream-latency",
+      "alerts_expected": [
+        "HighErrorRate",
+        "HighLatency"
+      ],
+      "inject": {
+        "method": "POST",
+        "urls": [
+          "/api/admin/fail/downstream",
+          "/api/admin/fail/latency"
+        ]
+      },
+      "traffic": {
+        "type": "POST /api/orders + GET /api/products",
+        "note": "downstream 502s and latency sleeps occur at the same time"
+      },
+      "expected_root_cause_keywords": {
+        "HighErrorRate": [
+          "downstream",
+          "payment",
+          "upstream",
+          "timeout",
+          "502",
+          "bad gateway"
+        ],
+        "HighLatency": [
+          "latency",
+          "delay",
+          "slow",
+          "p99"
+        ]
+      },
+      "expected_categories": {
+        "HighErrorRate": "error-rate",
+        "HighLatency": "latency"
+      },
+      "expected_confidence_min": 0.5,
+      "evaluation_note": "discrimination: HighErrorRate must cite the downstream timeout (not the latency sleep); HighLatency must cite latency (not the 502s). Cross-category pair."
+    },
+    {
+      "id": "case-009",
+      "fault": "composite-downstream-memory",
+      "alerts_expected": [
+        "HighErrorRate",
+        "HighMemoryUsage"
+      ],
+      "inject": {
+        "method": "POST",
+        "urls": [
+          "/api/admin/fail/downstream",
+          "/api/admin/fail/memory"
+        ]
+      },
+      "traffic": {
+        "type": "POST /api/orders",
+        "note": "downstream 502s and the memory-leak thread occur at the same time"
+      },
+      "expected_root_cause_keywords": {
+        "HighErrorRate": [
+          "downstream",
+          "payment",
+          "upstream",
+          "timeout",
+          "502",
+          "bad gateway"
+        ],
+        "HighMemoryUsage": [
+          "memory",
+          "heap",
+          "leak",
+          "old gen",
+          "allocation"
+        ]
+      },
+      "expected_categories": {
+        "HighErrorRate": "error-rate",
+        "HighMemoryUsage": "resource"
+      },
+      "expected_confidence_min": 0.5,
+      "evaluation_note": "discrimination: HighErrorRate must cite the downstream timeout (not the heap spike); HighMemoryUsage must cite heap (not the 502s)."
+    },
+    {
+      "id": "case-010",
+      "fault": "healthy-baseline",
+      "alert_expected": "HealthyCheck",
+      "inject": {
+        "method": "none",
+        "note": "no fault injected; a synthetic test alert is sent via POST /api/alert/test so the agent analyzes a NORMAL service"
+      },
+      "traffic": {
+        "type": "none",
+        "note": "normal background traffic only"
+      },
+      "expected_root_cause_keywords": [
+        "no",
+        "normal",
+        "anomaly",
+        "insufficient",
+        "evidence",
+        "not"
+      ],
+      "expected_confidence_max": 0.5,
+      "evaluation_note": "anti-false-positive control: with no fault, the agent must NOT invent a root cause; low confidence (<0.5) and 'no anomaly / insufficient evidence' is the CORRECT output."
+    },
+    {
+      "id": "case-011",
+      "fault": "staggered-error-latency",
+      "alert_expected": "HighLatency",
+      "inject": {
+        "method": "sequence",
+        "note": "error fault injected first and its alerts complete, then stopped; latency injected immediately after so the error's RuntimeException logs remain inside the Loki correlation window"
+      },
+      "traffic": {
+        "type": "POST /api/orders then GET /api/products",
+        "note": "phase 1 exercises orders (500s), phase 2 exercises products (sleeps)"
+      },
+      "expected_root_cause_keywords": [
+        "latency",
+        "delay",
+        "slow",
+        "p99"
+      ],
+      "expected_confidence_min": 0.5,
+      "evaluation_note": "temporal isolation: the HighLatency analysis window still contains the previous error's RuntimeException logs (Loki retention). Retrieval-layer exclusion (LogQL != RuntimeException for non-error-rate) must keep them out; the root cause must stay latency, never error."
+    },
+    {
+      "id": "case-012",
+      "fault": "staggered-downstream-error",
+      "alert_expected": "HighErrorRate",
+      "inject": {
+        "method": "sequence",
+        "note": "downstream fault first (leaves 'payment-service request timed out' ERROR logs), stopped; then error fault injected - its 5xx analysis window contains the stale downstream logs"
+      },
+      "traffic": {
+        "type": "POST /api/orders",
+        "note": "phase 1 502s, phase 2 connection-pool 500s"
+      },
+      "expected_root_cause_keywords": [
+        "runtimeexception",
+        "connection",
+        "pool",
+        "hikari",
+        "500"
+      ],
+      "expected_confidence_min": 0.5,
+      "evaluation_note": "LLM-layer discrimination under contamination: stale downstream logs sit inside the HighErrorRate context (error-rate does not exclude them at retrieval). The agent must recognize them as a competing/leftover signal and keep the root cause on the pool exhaustion, optionally reporting the downstream logs in competing_signals_observed."
     }
   ]
 }
