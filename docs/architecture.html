@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Incident Diagnosis Agent — System Architecture</title>
+<style>
+  body { margin: 0; background: #f4f6f9; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1460px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 20px; color: #1a2233; margin: 0 0 4px; }
+  .sub { color: #5a6b85; font-size: 13px; margin-bottom: 16px; }
+  svg { width: 100%; height: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 12px rgba(20,40,80,.08); }
+  .legend { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; color: #5a6b85; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 26px; height: 3px; display: inline-block; border-radius: 2px; }
+  .note { margin-top: 10px; font-size: 12px; color: #8a97ab; line-height: 1.7; }
+  .box { stroke: #c3cfdd; stroke-width: 1.2; rx: 10; }
+  .box-title { font-size: 15px; font-weight: 700; }
+  .box-sub { font-size: 11.5px; fill: #5a6b85; }
+  .core { fill: #eef4fd; stroke: #4a7bd8; stroke-width: 1.6; }
+  .infra { fill: #f7f9fc; }
+  .alert-flow { stroke: #e2574c; stroke-width: 2.2; }
+  .data-flow { stroke: #4a7bd8; stroke-width: 1.8; }
+  .log-flow { stroke: #9aa7bd; stroke-width: 1.6; stroke-dasharray: 6 4; }
+  .edge-label { font-size: 11px; fill: #3c4c66; }
+  .edge-num { font-size: 11px; font-weight: 700; fill: #fff; }
+  .num-badge { }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AI Incident Diagnosis Agent — System Architecture</h1>
+  <div class="sub">一次告警从发生到根因分析的完整旅程 · one full journey of an alert → diagnosis · 8 containers · Docker network: <code>monitoring</code></div>
+
+<svg viewBox="0 0 1400 1000" xmlns="http://www.w3.org/2000/svg" font-family="inherit">
+  <defs>
+    <marker id="arr-data" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill="#4a7bd8"/></marker>
+    <marker id="arr-alert" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill="#e2574c"/></marker>
+    <marker id="arr-log" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill="#9aa7bd"/></marker>
+  </defs>
+
+  <!-- ============ 背景分区 ============ -->
+  <text x="50" y="30" font-size="12" font-weight="700" fill="#8a97ab" letter-spacing="1">被监控的应用 · 可观测性栈</text>
+  <text x="720" y="30" font-size="12" font-weight="700" fill="#8a97ab" letter-spacing="1">AI Agent 核心</text>
+  <text x="1220" y="30" font-size="12" font-weight="700" fill="#8a97ab" letter-spacing="1">外部</text>
+
+  <!-- ============ demo-app ============ -->
+  <rect class="box infra" x="50" y="50" width="380" height="220"/>
+  <text class="box-title" x="70" y="80">demo-app :8080</text>
+  <text class="box-sub" x="70" y="98">Spring Boot · 被监控的示例电商服务 (e-commerce)</text>
+  <rect x="70" y="112" width="340" height="34" rx="6" fill="#eef2f8"/>
+  <text x="82" y="134" font-size="11" fill="#33415e">业务 API：GET /api/products · POST /api/orders · GET /health</text>
+  <rect x="70" y="154" width="340" height="34" rx="6" fill="#fdf0ee"/>
+  <text x="82" y="176" font-size="11" fill="#8a3a30">故障注入：POST /admin/fail/{error, latency, memory, downstream, stop}</text>
+  <rect x="70" y="196" width="340" height="34" rx="6" fill="#eef2f8"/>
+  <text x="82" y="218" font-size="11" fill="#33415e">指标出口：Micrometer → GET /actuator/prometheus</text>
+
+  <!-- 用户流量 -->
+  <line x1="8" y1="130" x2="46" y2="130" class="data-flow" marker-end="url(#arr-data)"/>
+  <text class="edge-label" x="6" y="120" text-anchor="start">client traffic</text>
+
+  <!-- ============ Prometheus ============ -->
+  <rect class="box infra" x="50" y="340" width="380" height="180"/>
+  <text class="box-title" x="70" y="370">Prometheus :9090</text>
+  <text class="box-sub" x="70" y="388">指标采集 + 告警规则 (scrape 15s / evaluate 15s)</text>
+  <text x="70" y="414" font-size="11" fill="#33415e">scrape: demo-app + agent-app (job) /actuator/prometheus</text>
+  <text x="70" y="436" font-size="11" fill="#33415e">5 条告警规则 (alert_rules.yml)：</text>
+  <text x="82" y="456" font-size="10.5" fill="#5a6b85">· DemoAppDown (up==0, 30s)</text>
+  <text x="82" y="474" font-size="10.5" fill="#5a6b85">· HighErrorRate (5xx rate > 10%, 1m)</text>
+  <text x="82" y="492" font-size="10.5" fill="#5a6b85">· HighLatency (p99 > 1s, 1m) · HighMemoryUsage (heap > 85%, 2m)</text>
+  <text x="82" y="508" font-size="10.5" fill="#5a6b85">· ConnectionPoolExhausted (HikariCP > 90%)</text>
+
+  <!-- demo-app → Prometheus scrape -->
+  <line x1="250" y1="270" x2="250" y2="336" class="data-flow" marker-end="url(#arr-data)"/>
+  <text class="edge-label" x="258" y="306" text-anchor="start">① scrape 指标 (15s)</text>
+
+  <!-- ============ Alertmanager ============ -->
+  <rect class="box infra" x="50" y="600" width="380" height="140"/>
+  <text class="box-title" x="70" y="630">Alertmanager :9093</text>
+  <text class="box-sub" x="70" y="648">告警路由 · 抑制 · webhook 通知</text>
+  <text x="70" y="674" font-size="11" fill="#33415e">route: 所有告警 → receiver "ai-agent-webhook"</text>
+  <text x="70" y="696" font-size="11" fill="#33415e">webhook → http://agent-app:8081/api/alert/webhook</text>
+  <text x="70" y="718" font-size="11" fill="#33415e">inhibit_rules: critical 抑制同 service/category 的 warning</text>
+
+  <!-- Prometheus → Alertmanager -->
+  <line x1="150" y1="520" x2="150" y2="596" class="alert-flow" marker-end="url(#arr-alert)"/>
+  <text class="edge-label" x="160" y="562" text-anchor="start">② alert firing → push</text>
+
+  <!-- ============ promtail + Loki ============ -->
+  <rect class="box infra" x="470" y="340" width="210" height="80"/>
+  <text class="box-title" x="490" y="368">promtail</text>
+  <text class="box-sub" x="490" y="386">日志收集器 (docker.sock)</text>
+  <text x="490" y="406" font-size="10.5" fill="#33415e">收集所有容器 stdout → Loki</text>
+
+  <rect class="box infra" x="470" y="470" width="210" height="90"/>
+  <text class="box-title" x="490" y="500">Loki :3100</text>
+  <text class="box-sub" x="490" y="518">日志存储 (LogQL 查询)</text>
+  <text x="490" y="540" font-size="10.5" fill="#33415e">{service="demo-app"} |= "ERROR"</text>
+
+  <line x1="470" y1="420" x2="470" y2="466" class="log-flow" marker-end="url(#arr-log)"/>
+  <text class="edge-label" x="370" y="446" text-anchor="end">container logs → push</text>
+
+  <!-- ============ agent-app 核心大框 ============ -->
+  <rect class="box core" x="720" y="50" width="470" height="800"/>
+  <text class="box-title" x="745" y="80" fill="#2c57a8">agent-app :8081 — Spring Boot · Spring AI</text>
+  <text class="box-sub" x="745" y="98">AI 核心编排层 (Java 17 · tool calling · RAG · structured output)</text>
+
+  <!-- Controller -->
+  <rect x="745" y="120" width="420" height="80" rx="8" fill="#ffffff" stroke="#b9c8e2" stroke-width="1.2"/>
+  <text x="762" y="146" font-size="12.5" font-weight="700" fill="#2c57a8">AlertWebhookController</text>
+  <text x="762" y="166" font-size="11" fill="#33415e">POST /api/alert/webhook — Alertmanager 推来的告警</text>
+  <text x="762" y="184" font-size="11" fill="#33415e">POST /api/alert/test — 手动触发测试告警</text>
+
+  <!-- AnalysisService -->
+  <rect x="745" y="230" width="420" height="150" rx="8" fill="#ffffff" stroke="#b9c8e2" stroke-width="1.2"/>
+  <text x="762" y="256" font-size="12.5" font-weight="700" fill="#2c57a8">AlertAnalysisService（核心编排脑）</text>
+  <text x="762" y="276" font-size="11" fill="#33415e">createAndAnalyze() → analyze() 同步管线：</text>
+  <text x="762" y="296" font-size="11" fill="#33415e">① 采集上下文 (metrics + logs + runbooks)</text>
+  <text x="762" y="314" font-size="11" fill="#33415e">② 构建结构化 prompt (system + user + 证据索引)</text>
+  <text x="762" y="332" font-size="11" fill="#33415e">③ 调用 LLM → ④ 解析 JSON → 持久化</text>
+  <text x="762" y="352" font-size="11" fill="#33415e">失败时降级 fallback：保留上下文 + 标记 FAILED</text>
+
+  <!-- Tools -->
+  <rect x="745" y="420" width="200" height="80" rx="8" fill="#ffffff" stroke="#b9c8e2" stroke-width="1.2"/>
+  <text x="760" y="446" font-size="12" font-weight="700" fill="#2c57a8">PrometheusToolService</text>
+  <text x="760" y="466" font-size="10.5" fill="#33415e">PromQL 查询工具 (L3)</text>
+  <text x="760" y="484" font-size="10.5" fill="#5a6b85">up / rate / p99 / heap…</text>
+
+  <rect x="965" y="420" width="200" height="80" rx="8" fill="#ffffff" stroke="#b9c8e2" stroke-width="1.2"/>
+  <text x="980" y="446" font-size="12" font-weight="700" fill="#2c57a8">LokiToolService</text>
+  <text x="980" y="466" font-size="10.5" fill="#33415e">LogQL 日志搜索工具 (L3)</text>
+  <text x="980" y="484" font-size="10.5" fill="#5a6b85">|= ERROR != 排除项 · 时间窗</text>
+
+  <!-- RAG -->
+  <rect x="745" y="540" width="420" height="80" rx="8" fill="#ffffff" stroke="#b9c8e2" stroke-width="1.2"/>
+  <text x="762" y="566" font-size="12" font-weight="700" fill="#2c57a8">RunbookRetrievalService (RAG · L2)</text>
+  <text x="762" y="586" font-size="11" fill="#33415e">keyword scoring 检索 → 本地 runbooks/*.md 知识库</text>
+  <text x="762" y="604" font-size="11" fill="#5a6b85">按 alertname/service/category 打分取 Top 3</text>
+
+  <!-- ModelRegistry -->
+  <rect x="745" y="650" width="420" height="70" rx="8" fill="#ffffff" stroke="#b9c8e2" stroke-width="1.2"/>
+  <text x="762" y="676" font-size="12" font-weight="700" fill="#2c57a8">AiModelRegistry（模型选择层）</text>
+  <text x="762" y="696" font-size="11" fill="#33415e">gpt-4o-mini (默认) · gpt-4.1-mini · gpt-4o — model-agnostic</text>
+
+  <!-- Repository -->
+  <rect x="745" y="750" width="420" height="60" rx="8" fill="#ffffff" stroke="#b9c8e2" stroke-width="1.2"/>
+  <text x="762" y="776" font-size="12" font-weight="700" fill="#2c57a8">IncidentRepository (Spring Data JPA)</text>
+  <text x="762" y="796" font-size="11" fill="#33415e">每个 incident 全量持久化（含 contextSnapshot / evidenceCitations）</text>
+
+  <!-- ============ OpenAI 云 ============ -->
+  <rect x="1210" y="50" width="170" height="130" rx="12" fill="#eef7f2" stroke="#3aa56f" stroke-width="1.6"/>
+  <text x="1230" y="80" font-size="12.5" font-weight="700" fill="#237a4f">OpenAI API</text>
+  <text x="1230" y="100" font-size="10.5" fill="#33415e">LLM 推理 (云端)</text>
+  <text x="1230" y="120" font-size="10.5" fill="#5a6b85">gpt-4o-mini</text>
+  <text x="1230" y="138" font-size="10.5" fill="#5a6b85">gpt-4.1-mini</text>
+  <text x="1230" y="156" font-size="10.5" fill="#5a6b85">gpt-4o</text>
+
+  <!-- ============ Postgres / Grafana ============ -->
+  <rect class="box infra" x="720" y="890" width="300" height="70" fill="#f0f7f2"/>
+  <text class="box-title" x="740" y="918" fill="#237a4f">Postgres :5432 — incident_agent</text>
+  <text class="box-sub" x="740" y="938">incidents 表 · 116+ 条真实记录（完整审计）</text>
+
+  <rect class="box infra" x="1050" y="890" width="280" height="70" fill="#fdf6ec"/>
+  <text class="box-title" x="1070" y="918" fill="#a86a20">Grafana :3000</text>
+  <text class="box-sub" x="1070" y="938">Prometheus + Loki 数据源 · 证据深链落地</text>
+
+  <!-- ============ 核心数据流箭头 ============ -->
+  <!-- ③ Alertmanager → agent-app webhook（指向 AlertWebhookController）-->
+  <path d="M 430 670 L 555 670 L 555 160 L 716 160" class="alert-flow" fill="none" marker-end="url(#arr-alert)"/>
+  <text class="edge-label" x="470" y="652">③ POST /api/alert/webhook</text>
+  <text class="edge-label" x="470" y="666" font-size="10" fill="#8a97ab">Alertmanager payload (JSON, 可批量)</text>
+
+  <!-- ④ agent-app → Prometheus (PromQL) -->
+  <line x1="716" y1="450" x2="434" y2="450" class="data-flow" marker-end="url(#arr-data)"/>
+  <text class="edge-label" x="470" y="432" text-anchor="start">④ PromQL 查询 (metrics 证据)</text>
+
+  <!-- ⑤ agent-app → Loki (LogQL) -->
+  <line x1="716" y1="470" x2="684" y2="470" class="data-flow" marker-end="url(#arr-data)"/>
+  <text class="edge-label" x="560" y="452" text-anchor="start">⑤ LogQL 查询 (logs 证据)</text>
+
+  <!-- ⑥ agent-app → OpenAI -->
+  <line x1="1190" y1="305" x2="1216" y2="305" class="data-flow" marker-end="url(#arr-data)"/>
+  <line x1="1216" y1="305" x2="1216" y2="184" class="data-flow" marker-end="url(#arr-data)"/>
+  <text class="edge-label" x="1204" y="250" text-anchor="start" font-size="10">⑥ LLM call</text>
+
+  <!-- ⑦ agent-app → Postgres -->
+  <line x1="960" y1="850" x2="960" y2="886" class="data-flow" marker-end="url(#arr-data)"/>
+  <text class="edge-label" x="970" y="872" font-size="10">⑦ JPA save (每次分析全量落库)</text>
+
+  <!-- Grafana 数据源（虚线，从 Postgres 上方穿过） -->
+  <line x1="1050" y1="872" x2="700" y2="872" class="log-flow" marker-end="url(#arr-log)"/>
+  <text class="edge-label" x="870" y="864" font-size="10">Grafana ↔ Prometheus / Loki 数据源</text>
+
+  <!-- 外部消费者：指向 agent-app 的 Incident API 区域 -->
+  <rect class="box infra" x="1210" y="760" width="170" height="80" fill="#f6f7fb"/>
+  <text x="1226" y="786" font-size="12" font-weight="700" fill="#3c4c66">External consumers</text>
+  <text x="1226" y="806" font-size="10.5" fill="#5a6b85">GET /api/incidents</text>
+  <text x="1226" y="822" font-size="10.5" fill="#5a6b85">/stats · dashboards</text>
+  <line x1="1210" y1="800" x2="1194" y2="800" class="data-flow" marker-end="url(#arr-data)"/>
+</svg>
+
+  <div class="legend">
+    <span><i class="sw" style="background:#4a7bd8"></i> 数据流 / 查询 (data flow)</span>
+    <span><i class="sw" style="background:#e2574c"></i> 告警流 (alert flow)</span>
+    <span><i class="sw" style="background:#9aa7bd; border-top: 0;"></i> 日志流 (log flow, 虚线)</span>
+    <span><i class="sw" style="background:#2c57a8"></i> agent-app 核心编排</span>
+  </div>
+  <div class="note">
+    面试复述版（手画）：<b>demo-app → Prometheus 收集指标 → 触发告警 → Alertmanager 推 webhook → agent-app 收告警 → 调工具查 Prometheus/Loki + 检索 runbook → 喂给 LLM → 输出结构化根因分析 → 落库 Postgres → Grafana 深链复现证据</b>。<br>
+    一次告警的完整生命周期：故障注入 → 指标异常 → 告警规则命中 → webhook 推送 → 上下文采集 → LLM 分析 → 证据链固化 → 持久化审计。<br>
+    窗口缩放提示：本图为矢量 SVG，任意窗口大小下保持清晰；需要细看时用 Cmd/Ctrl + 滚轮放大即可。
+  </div>
+</div>
+</body>
+</html>
