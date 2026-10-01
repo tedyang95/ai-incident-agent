@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# AI Incident Triage Agent - baseline evaluation script (single + composite faults)
+# AI Incident Diagnosis Agent - baseline evaluation script (single + composite faults)
 # Injects each fault (ground truth), waits for the AI analysis to complete,
 # pulls results from Postgres, and writes a CSV.
 #

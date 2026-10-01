@@ -1,4 +1,4 @@
-# AI Incident Triage Agent — Testing Strategy
+# AI Incident Diagnosis Agent — Testing Strategy
 
 > What this test suite proves, how it tests it, and why it is designed this way.
 > Companion code: `agent-app/src/test/java/com/example/agent/service/AlertAnalysisServiceTest.java` (7 tests)

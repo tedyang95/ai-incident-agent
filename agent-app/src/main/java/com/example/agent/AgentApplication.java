@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
- * AI Incident Triage Agent — application entry point.
+ * AI Incident Diagnosis Agent — application entry point.
  * <p>
  * Core workflow:
  * 1. Alertmanager delivers alerts to the agent via webhook

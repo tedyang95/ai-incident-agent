@@ -16,7 +16,7 @@ import java.util.Map;
  * Loki log-search tool service.
  * <p>
  * Exposed to the LLM as a tool so the agent can correlate live logs with
- * metrics during incident triage (AI capability level L3: Tool-using AI).
+ * metrics during incident diagnosis (AI capability level L3: Tool-using AI).
  */
 @Service
 public class LokiToolService {

@@ -1,4 +1,4 @@
-# AI Incident Triage Agent — 测试策略（Testing Strategy）
+# AI Incident Diagnosis Agent — 测试策略（Testing Strategy）
 
 > 面试用途文档：这套测试证明了什么、怎么测的、为什么这样测。
 > 配套代码：`agent-app/src/test/java/com/example/agent/service/AlertAnalysisServiceTest.java`（5 个测试）

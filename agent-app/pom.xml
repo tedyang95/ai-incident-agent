@@ -16,7 +16,7 @@
     <artifactId>agent-app</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>agent-app</name>
-    <description>AI Incident Triage Agent - receives alerts, calls tools, retrieves runbooks, analyzes root causes</description>
+    <description>AI Incident Diagnosis Agent - receives alerts, calls tools, retrieves runbooks, analyzes root causes</description>
 
     <properties>
         <java.version>17</java.version>

@@ -1,5 +1,5 @@
 {
-  "description": "AI Incident Triage Agent evaluation set (Golden Dataset): fault injection creates known root causes (ground truth) used to score LLM output during tuning. Used to measure (not train).",
+  "description": "AI Incident Diagnosis Agent evaluation set (Golden Dataset): fault injection creates known root causes (ground truth) used to score LLM output during tuning. Used to measure (not train).",
   "model_under_test": "gpt-4o-mini",
   "evaluation_metric": "expected_root_cause_keywords hit rate + confidence calibration + parse success rate + cost/latency",
   "cases": [

@@ -1,4 +1,4 @@
-# AI Incident Triage Agent — Tuning Log（v1 → v9）
+# AI Incident Diagnosis Agent — Tuning Log（v1 → v9）
 
 > 本页记录这个 AI 系统如何被逐步调"准"：每轮改了什么、观测到什么、为什么那样改。
 > 配套脚本：`docs/eval/run_baseline.sh`（评估）、`docs/eval/check_grounding.py`（引用真实性校验）

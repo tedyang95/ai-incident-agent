@@ -1,4 +1,4 @@
-# AI Incident Triage Agent — Tuning Log (v1 → v9)
+# AI Incident Diagnosis Agent — Tuning Log (v1 → v9)
 
 > How this AI system was iteratively tuned toward accurate diagnosis: what changed each round, what was observed, and why it was changed.
 > Companion tooling: `docs/eval/run_baseline.sh` (evaluation), `docs/eval/check_grounding.py` (citation-veracity checker)
@@ -81,7 +81,7 @@
 - **Change (root fix)**:
   - latency keywords dropped generic `timeout`, keeping only fault-injection markers (`sleeping` / `Latency fault`)
   - non-error-rate alerts **exclude `!= "RuntimeException"` at the LogQL layer** (concurrent error stack traces never enter this alert's context)
-- **Change (safety net)**: system prompt rules 8/9 — **discrimination instructions** (evidence must match THIS alert's metric signature: error-rate↔error rate / latency↔p99 / memory↔heap; competing signals go to `competing_signals_observed`, never the primary root cause; confidence capped at 0.5 when they cannot be excluded) + **explicit 3-step reasoning** (this alert's evidence → competing-signal triage → conclusion)
+- **Change (safety net)**: system prompt rules 8/9 — **discrimination instructions** (evidence must match THIS alert's metric signature: error-rate↔error rate / latency↔p99 / memory↔heap; competing signals go to `competing_signals_observed`, never the primary root cause; confidence capped at 0.5 when they cannot be excluded) + **explicit 3-step reasoning** (this alert's evidence → competing-signal analysis → conclusion)
 - **Change (measurable)**: output adds `competing_signals_observed` / `evidence_alignment` fields; `run_baseline.sh` supports composite injection and dual-alert waiting
 - **Result**: **9/9 hit** (single 3/3 + composite 3/3); **grounding 100%** (metric 8/8, log 8/8)
   - Key reversal: HighLatency in error+latency **0.8 wrong → 0.9 correct** (`evidence_alignment=consistent`, `competing_signals=[]` — once retrieval was fixed, the model never even saw the competing signal; root fix beats safety net)

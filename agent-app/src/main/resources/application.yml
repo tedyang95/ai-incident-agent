@@ -1,4 +1,4 @@
-# AI Incident Triage Agent configuration
+# AI Incident Diagnosis Agent configuration
 server:
   port: 8081
 

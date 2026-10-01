@@ -1,4 +1,4 @@
-# AI Incident Triage Agent - Docker Compose
+# AI Incident Diagnosis Agent - Docker Compose
 # One command brings up the full stack: demo app + monitoring + AI agent
 # Usage: docker compose up -d
 

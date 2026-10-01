@@ -1,4 +1,4 @@
-# 🚨 AI Incident Triage Agent
+# 🚨 AI Incident Diagnosis Agent
 
 > **When your server breaks, this AI tells you what broke, why, and how to fix it — in minutes.**
 
@@ -181,7 +181,7 @@ OPENAI_API_KEY=sk-...
 
 The agent only ever **reads** from them — it never writes to your metrics or logs.
 
-### Step 3 — Done. Every alert gets triaged automatically
+### Step 3 — Done. Every alert gets diagnosed automatically
 
 Each alert becomes a structured incident with:
 - **Root-cause hypothesis + confidence score** (grounded in quoted metrics & logs)
@@ -196,7 +196,7 @@ Results are queryable via the [Agent API](#agent-api) and stored in PostgreSQL:
 | Reads alerts from your Alertmanager | Your service code, configs, deployments |
 | Reads metrics + logs (read-only) | Your Prometheus, Loki, Grafana ownership |
 | Writes incidents to its own PostgreSQL | Your data stays in your systems |
-| Exposes REST API for triage results | Your existing on-call / notification flow |
+| Exposes REST API for diagnosis results | Your existing on-call / notification flow |
 
 > Running the full stack? `docker compose up -d` brings up the agent + a complete demo environment (demo-app, Prometheus, Alertmanager, Loki, Grafana, PostgreSQL) so you can see the whole pipeline before wiring in your own services.
 
@@ -274,12 +274,12 @@ ai-incident-agent/
 
 - [ ] **L5 Agentic Core** — multi-round investigation loop (agent decides what to query next)
 - [ ] **pgvector semantic search** — upgrade RAG from keyword to vector embedding
-- [ ] **Multi-agent orchestration** — separate agents for triage / investigation / notification
+- [ ] **Multi-agent orchestration** — separate agents for diagnosis / investigation / notification
 - [ ] **Slack / Teams integration** — push results to chat
 - [ ] **Jira / Linear integration** — auto-create incident tickets
 - [ ] **Auto-remediation** — suggest and (with approval) execute fixes
 - [ ] **Human-in-the-loop UI** — approve / reject analysis with feedback loop
-- [ ] **Model routing** — small model for triage, large model for deep analysis
+- [ ] **Model routing** — small model for diagnosis, large model for deep analysis
 
 ## License
 
