@@ -10,7 +10,7 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 
 ## 🎮 Try the interactive demo — 60 seconds, no install
 
-**[Launch the demo →](https://yangtong951019.github.io/ai-incident-agent/demo/)** · no API key, no Docker, no code.
+**[Launch the demo →](https://tedyang95.github.io/ai-incident-agent/demo/)** · no API key, no Docker, no code.
 
 Click a fault (**error spike / latency spike / memory leak**), watch the agent investigate metrics, logs and runbooks — then read a **real verdict with clickable evidence**, straight from the project's v9 evaluation runs.
 
