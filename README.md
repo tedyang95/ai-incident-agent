@@ -14,7 +14,7 @@ Built to answer the question every on-call engineer hates: *"What's actually wro
 
 > 💡 Tip: ⌘/Ctrl-click the demo link to open it in a new tab — the demo page also links back to this repo.
 
-Click a fault (**error spike / latency spike / memory leak**), watch the agent investigate metrics, logs and runbooks — then read a **real verdict with clickable evidence**, straight from the project's v9 evaluation runs.
+Click a fault (**error spike / latency spike / memory leak**), watch the agent investigate metrics, logs and runbooks — then read a **real verdict with clickable evidence**, straight from the project's v13 evaluation runs.
 
 ---
 
@@ -22,10 +22,11 @@ Click a fault (**error spike / latency spike / memory leak**), watch the agent i
 
 | Signal | Data |
 |---|---|
-| 🎯 **Fault diagnosis** | **9/9** scenarios correctly diagnosed — 3 single (error / latency / memory) + 3 composite (multi-alert) |
-| 🔍 **Evidence grounding** | **100%** of citations verified verbatim against retrieved context |
+| 🎯 **Fault diagnosis** | **19/19** alerts diagnosed correctly across **12 scenarios** — single faults, concurrent dual-faults, time-overlapping (staggered) incidents, and a healthy "nothing is wrong" control |
+| 🔍 **Evidence grounding** | **100%** verified verbatim — 19/19 metric & 14/14 log citations resolve to real retrieved data; 5 verdicts are deliberately metric-only (pre-OOM memory, healthy) |
 | 🔗 **Executable evidence** | LLM cites by **index** → backend resolves to real PromQL/LogQL + clickable Grafana deep links; fabricated indexes resolve to nothing |
-| 🎯 **Composite discrimination** | **9/9** across concurrent-fault cases; HighLatency 0.8 wrong call → **0.9** correct after retrieval isolation |
+| 🧭 **Multi-alert discrimination** | Concurrent faults and stale logs from the *previous* incident are attributed to the correct alert, never blended into one root cause |
+| 🛡️ **Calibrated confidence + guardrail** | Confidence means *probability of a real incident* (healthy → 0.5, real faults → 0.7–0.9); a deterministic backend guardrail corrects an LLM that under-calls, locked by unit tests |
 | 📈 **Tuning impact** | latency diagnosis confidence **0.5 → 0.9** after fixing a one-character LogQL bug + alert-aware retrieval |
 | 🏭 **Real stack** | Prometheus → Alertmanager → AI Agent → Loki → Grafana → PostgreSQL, all in Docker Compose |
 
@@ -61,7 +62,7 @@ Click a fault (**error spike / latency spike / memory leak**), watch the agent i
 
 ---
 
-## 🔬 The tuning story (v1 → v9)
+## 🔬 The tuning story (v1 → v13)
 
 | Run | Change | Result | Lesson |
 |---|---|---|---|
@@ -72,6 +73,10 @@ Click a fault (**error spike / latency spike / memory leak**), watch the agent i
 | v7b | **alert-aware keyword search** | latency 0.5 → 0.9 | tool signatures should adapt to the task |
 | v8 | **retrieval isolation + discrimination rules** | **9/9, 100% grounding, HighLatency 0.8 → 0.9** | feed clean evidence, then teach the model to discriminate |
 | v9 | **executable evidence citations** | **9/9 held, grounding 100%; citations resolve to real queries + Grafana links** | trust the index, not the model's memory |
+| v10 | expand to **12 scenarios**: downstream faults + time-overlapping (staggered) incidents | 19 scored alerts, new failure modes exposed | single-fault accuracy doesn't guarantee multi-alert accuracy |
+| v11 | tighten discrimination + orchestration for time-overlapping alerts | stale-log cross-contamination removed | a prior incident's logs are the hardest "competing signal" |
+| v12 | **category-scoped retrieval + healthy calibration** | **19/19 root cause correct** | scope every tool call to the alert's own category; a healthy verdict must score low |
+| v13 | exact-ratio error-rate PromQL · mandatory log citation · confidence semantics · **deterministic heap guardrail** | **19/19 · metric 19/19 · log 14/14 · confidence 0.5 / 0.7–0.9** | the grounding checker caught a bug in *my own monitoring query*; the prompt guides, a backend guardrail guarantees |
 
 Full experiment log with data: **[docs/TUNING.md](docs/TUNING.md)**
 
@@ -79,7 +84,7 @@ Full experiment log with data: **[docs/TUNING.md](docs/TUNING.md)**
 
 ## 🧪 How it's tested
 
-7 unit tests cover **every branch** of the core service — LLM failure (graceful degradation), success (structured output parsing), invalid JSON (fallback), markdown-wrapped JSON (parser tolerance), oversized context (truncation guard), plus v9 citation resolution (real evidence → resolved) and anti-fabrication (invented index → nothing). All external dependencies mocked: deterministic, isolated, ~1.7s.
+9 unit tests cover **every branch** of the core service — LLM failure (graceful degradation), success (structured output parsing), invalid JSON (fallback), markdown-wrapped JSON (parser tolerance), oversized context (truncation guard), v9 citation resolution (real evidence → resolved) and anti-fabrication (invented index → nothing), plus the v13 **confidence guardrail both ways** (heap over threshold but under-called → raised to the floor; heap under threshold → score untouched). All external dependencies mocked: deterministic, isolated, ~1.9s.
 
 → **[docs/TESTING-STRATEGY.md](docs/TESTING-STRATEGY.md)**
 

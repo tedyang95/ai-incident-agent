@@ -1,7 +1,7 @@
 # AI Incident Diagnosis Agent — Testing Strategy
 
 > What this test suite proves, how it tests it, and why it is designed this way.
-> Companion code: `agent-app/src/test/java/com/example/agent/service/AlertAnalysisServiceTest.java` (7 tests)
+> Companion code: `agent-app/src/test/java/com/example/agent/service/AlertAnalysisServiceTest.java` (9 tests)
 > Chinese version: [docs/TESTING-STRATEGY-zh.md](docs/TESTING-STRATEGY-zh.md)
 
 ---
@@ -11,7 +11,7 @@
 | Difficulty | Traditional system | AI system (this project's response) |
 |---|---|---|
 | **Output determinism** | fixed input → fixed output | LLM output is **non-deterministic** → tests must **mock the LLM** and fix its behavior |
-| **External dependencies** | DB/API reachable | LLM/Prometheus/Loki/RAG are all external → all mocked: **isolated**, **fast (~1.7s)**, **deterministic** |
+| **External dependencies** | DB/API reachable | LLM/Prometheus/Loki/RAG are all external → all mocked: **isolated**, **fast (~1.9s)**, **deterministic** |
 | **Failure modes** | single (exception) | **two**: throwing (network / 429) + returning garbage (ignoring the format) → both must be tested |
 | **State machine** | simple | `PENDING → ANALYZING → COMPLETED/FAILED` → every path must assert its terminal state |
 
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. Test matrix (7 tests = all branches of the main class)
+## 2. Test matrix (9 tests = all branches of the main class)
 
 Object under test: `AlertAnalysisService.createAndAnalyze()` (the alert-analysis entry point)
 
@@ -32,8 +32,10 @@ Object under test: `AlertAnalysisService.createAndAnalyze()` (the alert-analysis
 | 5 | `oversizedContext_shouldBeTruncated_withMarker` | normal + oversized evidence (400 log lines) | `relatedLogs` length 2015, `endsWith("[truncated]")` | `truncate()`: **context protection** |
 | 6 | `llmCitationByIndex_shouldResolveToExecutableEvidence` | cites `[E1]` / `[E2]` | `evidenceCitations` resolve to backend queries + deep links, `resolved=true` | v9 citation resolution: **executable evidence** |
 | 7 | `llmFabricatedCitationIndex_shouldNotResolveToAnyQuery` | cites non-existent `[E99]` | `resolved=false`, no query/url present | v9 anti-fabrication: **index mapping guard** |
+| 8 | `heapAboveThresholdButLowConfidence_guardrailRaisesToFloor` | memory alert, cites heap **0.987** but returns confidence **0.4** (self-contradictory) | guardrail raises confidence to **0.7** (reads only the model's own cited value, only ever raises) | v13 deterministic **confidence guardrail fires** |
+| 9 | `heapBelowThresholdLowConfidence_guardrailLeavesScoreUntouched` | memory alert, cites heap **0.62** (under the 0.85 threshold), confidence 0.4 | guardrail does **not** fire; score stays **0.4** (no false lift) | v13 guardrail **negative case** |
 
-**Two success/failure paths (tests 1&2) + two parser boundaries (tests 3&4) + one data-protection (test 5) + two v9 citation guards (tests 6&7) = every testable branch of the main class is covered.**
+**Two success/failure paths (tests 1&2) + two parser boundaries (tests 3&4) + one data-protection (test 5) + two v9 citation guards (tests 6&7) + the v13 guardrail both ways (tests 8&9) = every testable branch of the main class is covered.**
 
 ---
 
@@ -65,8 +67,8 @@ The main class continues working on the return value of `incident = repository.s
 
 **Opening (Apple-style: what → why → how)**
 > *"I test my AI system like any other critical service — because an AI that fails silently is worse than one that crashes."*
-> *"I wrote 7 unit tests covering every branch of my analysis pipeline: LLM outages, malformed outputs, oversized contexts, and citation integrity."*
-> *"The tests mock the LLM and external tools with Mockito, so they're deterministic, run in ~1.7s, and lock in my graceful-degradation contract."*
+> *"I wrote 9 unit tests covering every branch of my analysis pipeline: LLM outages, malformed outputs, oversized contexts, citation integrity, and a deterministic confidence guardrail — tested both firing and not firing."*
+> *"The tests mock the LLM and external tools with Mockito, so they're deterministic, run in ~1.9s, and lock in my graceful-degradation contract."*
 
 **Three points worth digging into**
 1. **Two failure modes**: *"An LLM can fail in two ways — throw an exception or return garbage. My tests cover both: exception → FAILED with preserved evidence; garbage → COMPLETED with confidence 0.3 and raw output saved for human review."*
@@ -89,7 +91,7 @@ The main class continues working on the return value of `incident = repository.s
 
 ## 6. Numbers at a glance (for resume / interviews)
 
-- **7 unit tests** covering every testable branch of `AlertAnalysisService`
-- Runtime **~1.7s** (no network, no DB, no real LLM call)
+- **9 unit tests** covering every testable branch of `AlertAnalysisService`
+- Runtime **~1.9s** (no network, no DB, no real LLM call)
 - Object under test: `AlertAnalysisService` (core orchestration logic)
 - Stack: JUnit 5 + Mockito + AssertJ (Java 17 / Maven Surefire)

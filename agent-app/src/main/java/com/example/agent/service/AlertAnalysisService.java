@@ -55,6 +55,13 @@ public class AlertAnalysisService {
 
     private static final Logger log = LoggerFactory.getLogger(AlertAnalysisService.class);
 
+    // Deterministic confidence guardrail for heap/memory alerts. Must match the
+    // HighMemoryUsage alert expression (G1 Old Gen heap used/max > 0.85).
+    private static final double HEAP_ALERT_THRESHOLD = 0.85;
+    private static final double HEAP_CONFIDENCE_FLOOR = 0.7;
+    private static final Pattern HEAP_CITATION = Pattern.compile(
+            "\\[metric:[^]]*heap[^]]*=\\s*([0-9]*\\.?[0-9]+)\\s*]", Pattern.CASE_INSENSITIVE);
+
     private final IncidentRepository repository;
     private final PrometheusToolService prometheusTool;
     private final LokiToolService lokiTool;
@@ -264,20 +271,62 @@ public class AlertAnalysisService {
                 3. Distinguish between "what the data shows" and "your hypothesis".
                 4. Provide concrete, actionable remediation steps, not generic advice.
                 5. Output MUST be valid JSON with the exact fields specified.
-                6. EVIDENCE CITATION (MANDATORY): In root_cause_hypothesis, you MUST quote
-                   at least one exact metric value from the METRICS section (format:
-                   [metric: <name> = <value>]). For log evidence, ONLY quote log lines that
-                   belong to THIS alert's fault class. If the LOGS section contains no log
-                   lines matching this alert's metric signature, state "No logs matching
-                   this alert's signature were found" and rely on metric evidence alone —
-                   NEVER quote an unrelated ERROR log just to satisfy a citation quota.
-                7. CONFIDENCE CALIBRATION: confidence must match how much quoted evidence
-                   you cite: 0.7-0.9 = this alert's own metric signature is clearly
-                   abnormal AND, if present, its own fault-class logs confirm it;
-                   0.5-0.6 = partial evidence; 0.2-0.4 = weak/indirect evidence; below
-                   0.2 = no evidence. evidence_strength must be consistent: strong =
-                   abnormal metric + confirming logs (when they exist), moderate = one
-                   quoted piece, weak/insufficient = none.
+                6. EVIDENCE CITATION (MANDATORY), machine-checkable formats only —
+                   put every such citation in analysis_detail:
+                   a. Metric: quote at least one exact value from the METRICS section as
+                      [metric: <name> = <value>]. Copy ONE single "value:" line verbatim —
+                      do not round, rewrite, or change its precision. NEVER combine series
+                      yourself: do not add, subtract, average, or do any other arithmetic across
+                      several returned series to manufacture a total that the query did not
+                      return. If a query returns one scalar, quote it; if it returns several
+                      series, quote the single one most relevant to THIS alert and describe the
+                      rest qualitatively, never as a computed aggregate.
+                   b. Log (MANDATORY whenever evidence exists): if the LOGS section contains
+                      ANY line matching THIS alert's own fault signature, you MUST quote one
+                      such line — citing it is required, not optional. This also holds INSIDE a
+                      composite incident where another fault is active: match the line to THIS
+                      alert's signature (a latency alert quotes the latency/fault-delay line; an
+                      error-rate alert quotes the exception/downstream line) and never skip it
+                      merely because a different fault is present at the same time. Quote a SHORT
+                      fragment copied VERBATIM (character for character) from a single log line,
+                      in this exact double-quoted form:
+                      [log: "<verbatim fragment>"] and append its [E{n}] right after it.
+                      Do not paraphrase, reword, translate, merge text across lines, or use
+                      single quotes — a reworded quote cannot be resolved and is worthless.
+                      Good: [log: "Connection is not available, request timed out after 30000ms"] [E6]
+                      Bad:  'connection pool errors in the logs' [E6]
+                   c. If NO log line matches THIS alert's fault class, state
+                      "No logs matching this alert's signature were found" and rely on
+                      metric evidence alone — NEVER quote an unrelated ERROR log or invent a
+                      fragment just to fill a citation quota. A correct metric-only diagnosis
+                      beats one propped up by a fabricated or paraphrased log quote.
+                7. CONFIDENCE CALIBRATION: score against THIS alert's PRIMARY signal, and do
+                   NOT demand evidence the fault mode does not produce:
+                   - FIRST, fix what confidence MEANS: it is the probability that a REAL,
+                     actionable incident is occurring RIGHT NOW — it is NOT how certain you are
+                     of your own sentence. Concluding "the service is healthy" with great
+                     certainty is still a LOW incident confidence.
+                   - HEALTHY OVERRIDE (highest priority): if the data is normal — up=1, error
+                     rate 0 (or far under threshold), latency/heap within bounds, and no
+                     fault-class logs — you MUST output confidence 0.3-0.5. Quoting exact NORMAL
+                     values (up=1, error_rate=0) is evidence OF health, never grounds for a high
+                     score, regardless of how many such metrics you cite. Do not let the
+                     "quote an exact metric" rule inflate a healthy verdict.
+                   - 0.7-0.9: the alert's own primary metric is clearly ABNORMAL (breaches its
+                     threshold) AND you quote its exact abnormal value. For error-rate / latency
+                     a matching fault-class log is ideal. For a resource/heap alert the precise
+                     heap-utilization number above threshold is SUFFICIENT ON ITS OWN: a leak
+                     pushes heap past the threshold long before it throws OutOfMemoryError, so
+                     the ABSENCE of an OutOfMemory log is the expected pre-OOM state and must
+                     NOT push confidence below 0.7 when the quoted heap value clearly breaches
+                     the threshold.
+                   - 0.5-0.6: the primary metric is abnormal but you describe it only
+                     qualitatively (e.g. "above 85%" with no exact quoted number), or the
+                     evidence is partial / indirect.
+                   - 0.2-0.4: weak or indirect evidence; below 0.2: no evidence.
+                   evidence_strength must track this: strong = exact abnormal primary value
+                   (+ confirming fault-class logs when that fault mode actually emits them),
+                   moderate = one quoted or qualitative piece, weak/insufficient = none.
                 8. DISCRIMINATION AGAINST CONCURRENT SIGNALS (CRITICAL): The retrieved
                    context MAY contain evidence from OTHER, concurrent incidents — this is
                    expected in production. Your root cause MUST be driven by THIS alert's
@@ -290,15 +339,32 @@ public class AlertAnalysisService {
                      competing signals for a latency alert — report them in
                      competing_signals_observed and NEVER make them the root cause, even
                      if they plausibly explain the slowness.
-                   - HighMemoryUsage: JVM heap / memory metrics drive it. ONLY memory
-                     markers in logs (e.g. "OutOfMemory") may confirm it. 5xx / downstream
-                     ERROR logs are ALWAYS competing signals for a memory alert — report
-                     them in competing_signals_observed and NEVER make them the root cause.
-                   a. Identify signals that do NOT match THIS alert's metric signature and
-                      report them in competing_signals_observed. Do NOT let them become
-                      your primary root cause.
-                   b. If competing signals cannot be fully excluded, cap confidence at 0.5
-                      and set evidence_alignment to "conflicting".
+                   - HighMemoryUsage: the JVM heap-utilization metric drives it, and its exact
+                     value is self-sufficient (a leak breaches the heap threshold before any
+                     OutOfMemoryError is logged, so a missing OutOfMemory line is not evidence
+                     against the diagnosis). OutOfMemory-style log markers may additionally
+                     confirm it when present. 5xx / downstream ERROR logs are ALWAYS competing
+                     signals for a memory alert — report them in competing_signals_observed and
+                     NEVER make them the root cause.
+                   a. ALWAYS quote THIS alert's OWN primary-metric exact value, in every
+                      analysis including composites: error-rate → the error-rate ratio,
+                      latency → the p99 value, memory → the heap-utilization value. A second
+                      fault being active is never a reason to omit this alert's own metric.
+                      Identify signals that do NOT match THIS alert's metric signature and
+                      report them in competing_signals_observed; do NOT let them become your
+                      primary root cause.
+                   b. Distinguish two very different kinds of competing signal:
+                      - A signal that belongs to a SEPARATE, genuinely-firing concurrent alert
+                        (the normal composite case — e.g. a real latency fault while you are
+                        scoring the memory alert) is NOT evidence against THIS alert. Do NOT cap
+                        THIS alert's confidence because of it: if THIS alert's own primary
+                        metric clearly breaches its threshold and you quote its exact value,
+                        score it on its own merits (a quoted heap value clearly over threshold
+                        stays >= 0.7 regardless of the other fault).
+                      - Only cap confidence at 0.5 and set evidence_alignment "conflicting"
+                        when a signal is genuinely UNEXPLAINED and you cannot tell whether it
+                        belongs to THIS alert or something else — not merely because another
+                        confirmed fault is present.
                 9. REASONING ORDER: work through 3 steps explicitly in analysis_detail —
                    (1) evidence most relevant to THIS alert's metric signature;
                    (2) competing signals observed and why they belong to a different
@@ -352,11 +418,16 @@ public class AlertAnalysisService {
 
                 === YOUR TASK ===
                 Analyze this alert and provide a structured root cause analysis in JSON format.
-                MANDATORY: quote at least one exact metric value (format: [metric: <name> = <value>])
-                inside root_cause_hypothesis or analysis_detail. Quote log lines ONLY if they
-                belong to THIS alert's fault class; otherwise state that no matching logs were
-                found. Analysis without any quoted metric will be treated as weak evidence
-                (confidence <= 0.4).
+                MANDATORY: in analysis_detail, quote at least one exact metric value
+                (format: [metric: <name> = <value>]). When you quote a log line, use the exact
+                machine-checkable form [log: "<verbatim fragment copied from one log line>"] and
+                append its [E{n}]; never use single quotes and never paraphrase the log text.
+                If ANY log line matches THIS alert's own fault signature you MUST quote one such
+                line — this still applies inside a composite incident, where you match the line
+                to THIS alert's signature even while another fault is active. Quote a log ONLY
+                when it matches THIS alert's fault class; if none match at all, state that no
+                matching logs were found and rely on the metric alone. Analysis without any
+                quoted metric will be treated as weak evidence (confidence <= 0.4).
                 MANDATORY: every evidence reference must cite its EVIDENCE INDEX number as [E{n}]
                 next to the quoted value/log line. NEVER invent index numbers — only [E{n}]
                 from the EVIDENCE INDEX exist, and invented ones cannot be resolved.
@@ -413,6 +484,9 @@ public class AlertAnalysisService {
             // to the real queries and deep links recorded by the backend.
             incident.setEvidenceCitations(buildEvidenceCitationsJson(llmOutput, evidenceList));
 
+            // v13 deterministic backstop: reconcile an internally-inconsistent heap verdict.
+            applyHeapConfidenceGuardrail(incident);
+
             log.info("Parsed analysis: confidence={}, rootCause={}",
                     incident.getConfidence(), incident.getRootCauseHypothesis());
 
@@ -422,6 +496,48 @@ public class AlertAnalysisService {
             incident.setRootCauseHypothesis("Failed to parse structured output - see analysis_detail");
             incident.setAnalysisDetail(llmOutput);
             incident.setConfidence(0.3);
+        }
+    }
+
+    /**
+     * Deterministic confidence guardrail for heap/memory alerts (v13).
+     *
+     * Prompt calibration is probabilistic: even after quoting a heap-utilization value that
+     * clearly breaches the HighMemoryUsage alert threshold ({@code used/max > 0.85}), the
+     * model sometimes returns a low confidence (observed 0.4-0.5) — an internally
+     * contradictory verdict. The prompt is the soft guide and stays the primary mechanism;
+     * this is a narrow, explainable backstop. It only reads a value the MODEL ITSELF cited,
+     * and only ever raises a too-low score toward the floor that breached primary evidence
+     * warrants — it never lowers a score and can never manufacture evidence.
+     */
+    private void applyHeapConfidenceGuardrail(Incident incident) {
+        try {
+            if (!"HighMemoryUsage".equalsIgnoreCase(incident.getAlertname())) {
+                return;
+            }
+            String detail = incident.getAnalysisDetail();
+            if (detail == null) {
+                return;
+            }
+            double maxCitedHeap = -1.0;
+            Matcher m = HEAP_CITATION.matcher(detail);
+            while (m.find()) {
+                try {
+                    maxCitedHeap = Math.max(maxCitedHeap, Double.parseDouble(m.group(1)));
+                } catch (NumberFormatException ignored) {
+                    // Skip a non-numeric capture rather than failing analysis.
+                }
+            }
+            if (maxCitedHeap > HEAP_ALERT_THRESHOLD && incident.getConfidence() < HEAP_CONFIDENCE_FLOOR) {
+                double original = incident.getConfidence();
+                incident.setConfidence(HEAP_CONFIDENCE_FLOOR);
+                log.warn("Confidence guardrail: {} cited heap={} (threshold {}) but confidence={}; raised to {}",
+                        incident.getAlertname(), maxCitedHeap, HEAP_ALERT_THRESHOLD,
+                        original, HEAP_CONFIDENCE_FLOOR);
+            }
+        } catch (Exception e) {
+            // A guardrail must never break the primary analysis path.
+            log.warn("Heap confidence guardrail skipped due to error: {}", e.getMessage());
         }
     }
 

@@ -1,7 +1,7 @@
 # AI Incident Diagnosis Agent — 测试策略（Testing Strategy）
 
 > 面试用途文档：这套测试证明了什么、怎么测的、为什么这样测。
-> 配套代码：`agent-app/src/test/java/com/example/agent/service/AlertAnalysisServiceTest.java`（5 个测试）
+> 配套代码：`agent-app/src/test/java/com/example/agent/service/AlertAnalysisServiceTest.java`（9 个测试）
 
 ---
 
@@ -10,7 +10,7 @@
 | 难点 | 传统系统 | AI 系统（本项目的应对） |
 |---|---|---|
 | **输出确定性** | 输入固定 → 输出固定 | LLM 输出**非确定**（non-deterministic）→ 测试必须 **mock LLM**，固定它的行为 |
-| **外部依赖** | DB/API 可连 | LLM/Prometheus/Loki/RAG 全是外部 → 全 mock，测试**隔离（isolated）**、**快（~1.7s）**、**可复现（deterministic）** |
+| **外部依赖** | DB/API 可连 | LLM/Prometheus/Loki/RAG 全是外部 → 全 mock，测试**隔离（isolated）**、**快（~1.9s）**、**可复现（deterministic）** |
 | **失败模式** | 单一（异常） | **两种**：抛异常（网络/429）+ 返回垃圾（不遵守格式）→ 两种都要测 |
 | **状态机** | 简单 | `PENDING → ANALYZING → COMPLETED/FAILED` → 每条路径都要断言终态 |
 
@@ -18,19 +18,23 @@
 
 ---
 
-## 2. 测试矩阵（5 个测试 = 主类全部分支）
+## 2. 测试矩阵（9 个测试 = 主类全部分支）
 
 被测对象：`AlertAnalysisService.createAndAnalyze()`（告警分析主入口）
 
 | # | 测试名 | LLM 行为（mock） | 断言的核心 | 覆盖的主类路径/分支 |
 |---|---|---|---|---|
-| 1 | `llmFailure_shouldMarkIncidentAsFailed_gracefulDegradation` | `.call()` 抛 `RuntimeException` | 状态 `FAILED`、错误信息保留、取证上下文保留、confidence 0.0 | 外层 catch（L85-92）：**失败降级** |
-| 2 | `llmSuccess_shouldParseStructuredOutput_andCompleteIncident` | 返回合法结构化 JSON | 状态 `COMPLETED`、根因/置信度/actions 正确解析 | 成功路径（L143-167）：**正常解析** |
-| 3 | `llmReturnsInvalidJson_shouldFallbackToRawOutput` | 返回纯文本（非 JSON） | 状态仍 `COMPLETED`、原文存 `analysisDetail`、confidence 0.3 | 内层 catch（L272-278）：**解析容错** |
-| 4 | `llmReturnsJsonWrappedInMarkdown_shouldCleanAndParseSuccessfully` | 返回 ```json 包裹的 JSON | 清理后仍解析成功（COMPLETED + 字段正确） | markdown 清理逻辑（L247-251）：**容错解析器** |
-| 5 | `oversizedContext_shouldBeTruncated_withMarker` | 正常 + 取证文本超长（400 行日志） | `relatedLogs` 长度 2015、`endsWith("[truncated]")` | `truncate()`（L281-285）：**上下文保护** |
+| 1 | `llmFailure_shouldMarkIncidentAsFailed_gracefulDegradation` | `.call()` 抛 `RuntimeException` | 状态 `FAILED`、错误信息保留、取证上下文保留、confidence 0.0 | 外层 catch：**失败降级（graceful degradation）** |
+| 2 | `llmSuccess_shouldParseStructuredOutput_andCompleteIncident` | 返回合法结构化 JSON | 状态 `COMPLETED`、根因/置信度/actions 正确解析 | 成功路径：**正常解析** |
+| 3 | `llmReturnsInvalidJson_shouldFallbackToRawOutput` | 返回纯文本（非 JSON） | 状态仍 `COMPLETED`、原文存 `analysisDetail`、confidence 0.3 | 内层 catch：**解析容错** |
+| 4 | `llmReturnsJsonWrappedInMarkdown_shouldCleanAndParseSuccessfully` | 返回 ```json 包裹的 JSON | 清理后仍解析成功（COMPLETED + 字段正确） | markdown 清理逻辑：**容错解析器** |
+| 5 | `oversizedContext_shouldBeTruncated_withMarker` | 正常 + 取证文本超长（400 行日志） | `relatedLogs` 长度 2015、`endsWith("[truncated]")` | `truncate()`：**上下文保护** |
+| 6 | `llmCitationByIndex_shouldResolveToExecutableEvidence` | 引用 `[E1]` / `[E2]` | `evidenceCitations` 映射到后端真实查询 + Grafana 深链，`resolved=true` | v9 证据链：**可执行引用（executable evidence）** |
+| 7 | `llmFabricatedCitationIndex_shouldNotResolveToAnyQuery` | 引用不存在的 `[E99]` | `resolved=false`、不产生任何 query/url | v9 防伪：**编号映射护栏（index mapping guard）** |
+| 8 | `heapAboveThresholdButLowConfidence_guardrailRaisesToFloor` | memory 告警，引用 heap **0.987** 却给 confidence **0.4**（自相矛盾） | 护栏把置信度抬到 **0.7**（只读模型自己引用的值、只升不降） | v13 确定性**置信度护栏触发** |
+| 9 | `heapBelowThresholdLowConfidence_guardrailLeavesScoreUntouched` | memory 告警，引用 heap **0.62**（未过 0.85 阈值），confidence 0.4 | 护栏**不触发**，分数保持 **0.4**（不无端抬升） | v13 护栏**反向用例（negative case）** |
 
-**两条成功/失败路径（测试1&2）+ 两个解析器边界（测试3&4）+ 一个数据保护（测试5）= 主类所有可测分支全覆盖。**
+**两条成功/失败路径（测试 1&2）+ 两个解析器边界（测试 3&4）+ 一个数据保护（测试 5）+ 两个 v9 引用护栏（测试 6&7）+ v13 置信度护栏的触发/不触发双向（测试 8&9）= 主类所有可测分支全覆盖。**
 
 ---
 
@@ -62,8 +66,8 @@
 
 **开场（苹果式：小学生能懂 → 本质 → 技术细节）**
 > *"I test my AI system like any other critical service — because an AI that fails silently is worse than one that crashes."*
-> *"I wrote 5 unit tests covering every branch of my analysis pipeline: LLM outages, malformed outputs, and oversized contexts."*
-> *"The tests mock the LLM and external tools with Mockito, so they're deterministic, run in ~1.7s, and lock in my graceful degradation contract."*
+> *"I wrote 9 unit tests covering every branch of my analysis pipeline: LLM outages, malformed outputs, oversized contexts, citation integrity, and a deterministic confidence guardrail — tested both firing and not firing."*
+> *"The tests mock the LLM and external tools with Mockito, so they're deterministic, run in ~1.9s, and lock in my graceful-degradation contract."*
 
 **三个可深挖的点**
 1. **两种失败模式**：*"An LLM can fail in two ways — throw an exception or return garbage. My tests cover both: exception → FAILED with preserved evidence; garbage → COMPLETED with confidence 0.3 and raw output saved for human review."*
@@ -86,7 +90,7 @@
 
 ## 6. 数字速查（写进简历/面试）
 
-- 5 个单元测试，覆盖 `AlertAnalysisService` 全部可测分支
-- 测试运行时间 **~1.7s**（无网络、无 DB、无 LLM 真实调用）
-- 被测类：`AlertAnalysisService`（287 行核心编排逻辑）
-- 测试框架：JUnit 5 + Mockito + AssertJ（Java 17 / Maven Surefire 3.2.5）
+- 9 个单元测试，覆盖 `AlertAnalysisService` 全部可测分支
+- 测试运行时间 **~1.9s**（无网络、无 DB、无 LLM 真实调用）
+- 被测类：`AlertAnalysisService`（核心编排逻辑）
+- 测试框架：JUnit 5 + Mockito + AssertJ（Java 17 / Maven Surefire）

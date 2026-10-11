@@ -113,8 +113,15 @@ public class PrometheusToolService {
         // 2. Request rate
         sb.append("[Request Rate]\n").append(query("rate(http_server_requests_seconds_count{job='" + service + "'}[5m])")).append("\n");
 
-        // 3. Error rate
-        sb.append("[Error Rate]\n").append(query("rate(http_server_requests_seconds_count{job='" + service + "',status=~'5..'}[5m])")).append("\n");
+        // 3. Error rate — the RATIO of 5xx request rate to total request rate, a single
+        //    scalar in [0,1] aligned with the HighErrorRate alert expression. The previous
+        //    expression was raw 5xx requests-per-second split into several series (by
+        //    uri/status), which (a) was not a proportion and (b) tempted the LLM to sum the
+        //    per-series rates itself and quote a number the query never returned. The summed
+        //    ratio returns exactly one value, so it can be quoted verbatim.
+        sb.append("[Error Rate]\n").append(query(
+                "sum(rate(http_server_requests_seconds_count{job='" + service + "',status=~'5..'}[5m])) "
+                        + "/ sum(rate(http_server_requests_seconds_count{job='" + service + "'}[5m]))")).append("\n");
 
         // 4. p99 latency
         sb.append("[p99 Latency]\n").append(query("histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{job='" + service + "'}[5m]))")).append("\n");

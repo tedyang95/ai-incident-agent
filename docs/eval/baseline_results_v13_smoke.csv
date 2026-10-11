@@ -1,0 +1,5 @@
+time,fault,incident_id,alertname,status,confidence,prompt_tokens,completion_tokens,duration_ms,root_cause
+00:34:52,error,250|HighErrorRate|COMPLETED|0.8|7084|274|4333|Thehigherrorrateislikelyduetodatabaseconnectionpoolexhaustion,asindicatedbytheSQLTransientConnectionExceptionerrorsinthelogs.
+00:37:42,latency,252|HighLatency|COMPLETED|0.9|5349|272|5209|Thehighp99latencyislikelycausedbyafaultinjectionthatintroducesartificialdelaysinrequestprocessing.
+00:43:24,memory,254|HighMemoryUsage|COMPLETED|0.8|5294|275|3548|ThehighJVMheapmemoryusageislikelyduetoamemoryleakorinefficientmemorymanagementintheapplication.
+00:46:12,downstream,257|HighErrorRate|COMPLETED|0.8|7489|270|3139|Thehigherrorrateislikelycausedbydownstreamservicefailures,specificallytimeoutswhencallingthepaymentservice.

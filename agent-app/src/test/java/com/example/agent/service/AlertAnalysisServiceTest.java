@@ -458,4 +458,79 @@ class AlertAnalysisServiceTest {
         assertThat(result.getEvidenceCitations()).doesNotContain("\"query\"");
         assertThat(result.getEvidenceCitations()).doesNotContain("explore");
     }
+
+    @Test
+    void heapAboveThresholdButLowConfidence_guardrailRaisesToFloor() {
+        // ============================================================
+        // 1. Arrange: a memory alert. The model itself quotes heap at 98.7%
+        //    (far above the 0.85 alert threshold) yet, non-deterministically,
+        //    returns confidence 0.4 — an internally contradictory verdict.
+        // ============================================================
+        Incident memory = buildIncident();
+        memory.setAlertname("HighMemoryUsage");
+        memory.setCategory("resource-memory");
+        mockToolsReturn(
+                "jvm_memory_used_bytes{area=\"heap\"} / jvm_memory_max_bytes{area=\"heap\"} 0.987",
+                "(no OutOfMemory line yet — pre-OOM state is expected)",
+                "## High Memory Usage Runbook\n1. Take a heap dump"
+        );
+        mockChatClientSuccess("""
+                {
+                  "root_cause_hypothesis": "JVM heap exhaustion from a memory leak",
+                  "analysis_detail": "Heap is [metric: jvm_memory_used_bytes{job='demo-app',area='heap'} / jvm_memory_max_bytes{job='demo-app',area='heap'} = 0.9868892513975805], above the alert threshold.",
+                  "suggested_actions": ["Take a heap dump", "Roll back the latest deploy"],
+                  "confidence": 0.4,
+                  "evidence_strength": "strong"
+                }
+                """);
+        when(repository.save(any(Incident.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // ============================================================
+        // 2. Act
+        // ============================================================
+        Incident result = alertAnalysisService.createAndAnalyze(memory);
+
+        // ============================================================
+        // 3. Assert: the deterministic backstop raises confidence to the
+        //    floor (0.7) warranted by the breached, precisely-cited primary metric.
+        // ============================================================
+        assertThat(result.getStatus()).isEqualTo(Incident.AnalysisStatus.COMPLETED);
+        assertThat(result.getConfidence()).isEqualTo(0.7);
+    }
+
+    @Test
+    void heapBelowThresholdLowConfidence_guardrailLeavesScoreUntouched() {
+        // ============================================================
+        // 1. Arrange: a memory alert whose cited heap value (0.62) is UNDER
+        //    the 0.85 threshold. The guardrail must NOT fire (no false lift).
+        // ============================================================
+        Incident memory = buildIncident();
+        memory.setAlertname("HighMemoryUsage");
+        memory.setCategory("resource-memory");
+        mockToolsReturn(
+                "jvm_memory_used_bytes{area=\"heap\"} / jvm_memory_max_bytes{area=\"heap\"} 0.62",
+                "(no fault-class logs)",
+                "## High Memory Usage Runbook"
+        );
+        mockChatClientSuccess("""
+                {
+                  "root_cause_hypothesis": "Heap elevated but not yet conclusive",
+                  "analysis_detail": "Heap is [metric: heap utilization = 0.62], below the alert threshold; evidence is weak.",
+                  "suggested_actions": ["Keep watching"],
+                  "confidence": 0.4,
+                  "evidence_strength": "weak"
+                }
+                """);
+        when(repository.save(any(Incident.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // ============================================================
+        // 2. Act
+        // ============================================================
+        Incident result = alertAnalysisService.createAndAnalyze(memory);
+
+        // ============================================================
+        // 3. Assert: with no breached cited value, the model's low score stands.
+        // ============================================================
+        assertThat(result.getConfidence()).isEqualTo(0.4);
+    }
 }

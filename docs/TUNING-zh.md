@@ -1,8 +1,9 @@
-# AI Incident Diagnosis Agent — Tuning Log（v1 → v9）
+# AI Incident Diagnosis Agent — Tuning Log（v1 → v13）
 
 > 本页记录这个 AI 系统如何被逐步调"准"：每轮改了什么、观测到什么、为什么那样改。
 > 配套脚本：`docs/eval/run_baseline.sh`（评估）、`docs/eval/check_grounding.py`（引用真实性校验）
-> 数据：`docs/eval/baseline_results_{v1..v9}.csv`、PostgreSQL `incidents` 表（可回查每条原始分析）
+> 数据：`docs/eval/baseline_results_{v1..v13}.csv`、PostgreSQL `incidents` 表（可回查每条原始分析）
+> English version: [docs/TUNING.md](docs/TUNING.md)
 
 ---
 
@@ -13,7 +14,7 @@
 | 概念 | 本项目的落地 |
 |---|---|
 | **Ground truth** | 注入已知故障（error/latency/memory）→ 正确答案是"已知的" → 用来自动打分。**measure, not train** |
-| **评估集（eval set）** | `docs/eval/eval-cases.json`（3 个 case，含 expected root-cause keywords） |
+| **评估集（eval set）** | `docs/eval/eval-cases.json` —— **12 个场景 / 19 个被打分告警**：4 个单故障（error/latency/memory/downstream）、5 个并发双故障（10 告警）、2 个时序重叠 staggered（4 告警）、1 个 healthy 对照；每个告警都有按 alertname 的 ground truth |
 | **评估脚本** | `run_baseline.sh`：注入故障 → 压流量 → 等 AI 分析完成 → 拉 Postgres → 写 CSV |
 | **隔离（settle）** | 每个 case 前等告警清空 + 30s，防止上一个 case 的"脏数据"污染下一个 |
 | **Grounding check** | `check_grounding.py`：逐字验证每条 `[metric:]`/`[log:]` 引用是否真实存在于检索上下文 |
@@ -22,13 +23,17 @@
 
 ---
 
-## 1. 评估的三种故障（Ground Truth）
+## 1. 评估的故障场景（Ground Truth）
 
 | 故障 | 注入方式 | 期望告警 | 期望根因关键词 |
 |---|---|---|---|
-| error | POST /api/orders 返回 500 | HighErrorRate | RuntimeException, error rate |
-| latency | 所有请求延迟 2-5s | HighLatency | p99 latency, delay |
-| memory | 内存泄漏 ~10MB/s | HighMemoryUsage | heap memory, jvm |
+| error | POST /api/orders 返回 500 | HighErrorRate | 连接池耗尽、SQLTransientConnectionException |
+| latency | 所有请求延迟 2-5s | HighLatency | p99 latency、delay |
+| memory | 内存泄漏 ~10MB/s | HighMemoryUsage | heap memory、jvm |
+| downstream | 下游依赖（payment service）超时 → 502 | HighErrorRate | 下游超时、502（与 `error` **不同**的根因） |
+| **healthy 对照** | 只发合成告警、**不注入故障** | HealthyCheck | "no anomaly detected"、confidence ≤ 0.5（一个正确的"非事故"） |
+
+场景还以两种方式组合：**并发（concurrent）**（两个故障同时注入 → 两条独立告警）与 **时序重叠（staggered）**（先停 A、在 A 的日志还停留在 Loki 窗口内时触发 B——时序隔离测试）。
 
 ---
 
@@ -100,20 +105,49 @@
 - **新增测试 2 个（共 7/7）**：①编号解析映射成功（resolved=true，query/url 来自后端）②伪造编号防御（`[E99]` → resolved=false 且无任何 query）
 - **教训**：*"trust the index, not the model's memory"* —— 证据可信度应该靠**架构保证**（编号→真实查询的映射在后端），而不是靠**提示词约束**（让模型自觉诚实）。引用是选择（selection），生成是创作（generation）——让模型做前者，让后端做后者
 
+### v10 — 扩大评估集：12 场景 / 19 告警
+- **背景**：3 个故障上的 9/9 看似饱和，但只覆盖了同类别的单/复合故障。评估集扩到 **12 场景**，新增：**downstream** 故障（依赖超时→502，同样触发 HighErrorRate 但根因不同）、**staggered** 时序重叠（停 A 后趁 A 的日志还在窗口内触发 B）、以及 **healthy 对照**（什么都没坏只发一条合成告警）。
+- **结果**：旧场景根因保持正确，但新场景立刻暴露了校准缺口（memory 置信度、healthy 判定、残留日志归属）。
+- **教训**：**9/9 通过只说明评估集太小，不代表系统做完了**。只有新增"故障类别 / 时序 / 显式负样本"这类新场景，才能暴露新的失败模式。
+
+### v11 — 时序重叠（staggered）判别
+- **改动**：针对相关窗口仍含上一故障日志的情况强化判别，并收紧编排，让每条告警只按自己的指标签名打分。
+- **结果**：在残留 error 日志上触发的 latency、在残留 downstream 日志上触发的 error，都被正确归属。
+- **教训**：最难的竞争信号是**真实但已过去**的那次事故留下的证据——检索隔离 + 签名核对，比叮嘱模型"小心点"有用。
+
+### v12 — 按类别限定检索（category-scoped retrieval）+ healthy 校准
+- **改动**：每次工具调用都按本告警类别限定范围（检索词、日志过滤、runbook 匹配）；prompt 明确把 healthy 判定定义为低置信的"非事故"结果。
+- **结果**：**19/19 根因正确**，包括 healthy 对照正确回答"无异常"。
+- **教训**：**按告警类别限定喂给模型的证据**；并且记住 confidence 描述的是"事故"，不是模型对自己那句话的确信度。
+
+### v13 — 逐字 grounding、置信度语义、确定性护栏
+本轮本想"修两个小瑕疵"，但 100%-grounding 自检逼着逐层挖出四个更深、且都有证据支撑的修复（每轮只动一个变量、单独重测，留档于 `baseline_results_v13_round1..4.csv`）：
+
+- **v13a — 日志引用格式（外壳问题，不是幻觉）。** error 类没有一条 checker 认得的引用，因为 prompt 从没教过精确的 `[log: "<verbatim>"]` 双引号格式，模型自发用单引号转述。引用内容真实、但无法解析。→ 教会两种机器可校验格式并要求逐字复制。
+- **v13b — memory 置信度规则本身错了。** 旧规则要求一条同类故障日志（OutOfMemory），但内存在 OOM 之前根本不会打这条日志。→ 改为按告警的**主指标（primary signal）**校准：精确引用且超阈值的 heap 值本身就足以支撑高置信。
+- **v13c — grounding checker 反过来抓到了我自己监控查询的 bug。** error-rate grounding 卡在 95%：模型把两条 5xx 每秒速率 series（0.077+0.091）相加，引用了查询从没返回的总数。根因：工具的 PromQL 是 `rate(5xx)`——**按 series 拆分的每秒请求数，不是比率**（只在单故障时碰巧像 70%）。→ 改成与告警完全一致的 `sum(rate(5xx)) / sum(rate(all))` 单标量，并在 prompt 禁止跨 series 做算术。
+- **v13d — 强制引用召回（recall）。** latency+memory 复合中，latency 注入日志**已被检索到却没被引用**（证据在手、没进证据链）——这是**召回**缺口而非精确率缺口。→ 改为"只要有匹配本告警 signature 的日志就必须引一条"，复合故障内同样适用。
+- **v13e — 置信度语义 + 确定性护栏。** 一次 healthy 跑成了 0.9（"我很确定它健康"），memory 在引用 heap≈0.987 的情况下置信度仍在 0.4–0.7 间漂移。两处改动：(1) prompt 把 confidence 定义为**"此刻正在发生一起真实、需要处理的事故的概率"**，加 HEALTHY override（正常值→0.3–0.5），并重写规则区分"已确认的并发故障"（不压低本告警分数）与"无法解释的冲突信号"（封顶 0.5）；(2) 后端加一个很窄的**护栏** `applyHeapConfidenceGuardrail`——若模型自己引用的 heap 已超 0.85 告警阈值却给 <0.7，后端把它抬到 0.7。它只读模型自己引用的数值、只会上调、且有两个单测锁定；最终轮真实**触发 3 次**，确定性地消除了残余漂移。
+- **最终结果**：**19/19 根因** · **metric grounding 19/19** · **log grounding 14/14**（5 个 metric-only 判定为设计内：4 个 OOM 前 memory + healthy）· confidence **healthy 0.5 / fault 0.7–0.9** · **单测 9/9**。
+- **教训**：*"Measure, then trust the architecture over the model's mood."* prompt 是软引导、应保持为主；但对必须**保证**的属性（自相矛盾的判定），一个小而可解释、有测试的确定性护栏，比重写 prompt 然后碰运气更可靠。另外：grounding checker 不只是查 LLM 的——它连你自己写的 PromQL 一样会抓。
+
 ---
 
 ## 3. 量化总结（Summary）
 
-| 指标 | 起始 | 最终 |
+| 指标 | 起始 | 最终（v13） |
 |---|---|---|
-| 故障命中率 | 2/3（v1） | **9/9（v8→v9 保持：单故障 3/3 + 复合 3/3）** |
-| 引用真实性（grounding） | 0%（v2 全是编造） | **100%（v9 回归保持：metric 7/7 + log 7/7 逐字）** |
-| latency 诊断置信度 | 0.5（无证据） | **0.9**（alert-aware 检索 + 复合判别） |
-| error 诊断置信度 | 0.7 | **0.9**（correlation window 后） |
-| memory 诊断置信度 | 0.7 | **0.8**（单故障；复合下无日志证据时正确降置信 0.4） |
-| 复合判别力（discrimination） | 第一轮 2/3（HighLatency 被污染错判） | **3/3**（检索层排除后翻正） |
+| 评估覆盖 | 3 个单故障 | **12 场景 / 19 个被打分告警**（单故障 · 并发 · staggered · healthy 对照） |
+| 根因命中率 | 2/3（v1） | **19/19**（含 healthy 正确判为"非事故"） |
+| 引用真实性（grounding） | 0%（v2 全是编造） | **metric 19/19 + log 14/14（100%）**；5 个 metric-only 判定为设计内、不是漏引 |
+| error-rate 指标语义 | 按 series 拆分的 5xx 每秒速率（被误读为百分比） | **单标量 `sum(5xx)/sum(all)`**，与告警表达式一致 |
+| latency 诊断置信度 | 0.5（无证据） | **0.9**（alert-aware 检索 + 复合/staggered 判别） |
+| memory 诊断置信度 | 在 0.4–0.8 间摇摆（日志规则错） | **稳定 0.7**（heap 主指标规则 + 确定性护栏） |
+| healthy 对照 | 一度虚高 0.9 | **0.5**（confidence=事故概率，非自我确信度） |
+| 复合 / staggered 判别力 | 第一轮多告警被污染 | 即使有并发或残留故障，也**按告警正确归属** |
 | Loki 日志链路 | HTTP 400（第一天就坏） | **HTTP 200，streams 0→1** |
 | 证据可执行化（v9） | 引用是文本，无法复现 | **LLM 引用编号 → 后端映射真实查询 + Grafana 深链**（伪造编号 → resolved=false） |
+| 单元测试 | – | **9/9**，含护栏"触发 / 不触发"双向用例 |
 
 ---
 
@@ -134,6 +168,9 @@
 ### 证据可信度的架构保证（executable citations）
 > *"The last trust gap wasn't diagnosis accuracy — it was that my agent's citations were text, not actions. I made evidence executable: tools record every query they really ran, the prompt exposes an evidence index of real queries, and the model cites by number. The backend resolves each number to the actual query and a Grafana deep link; an invented index resolves to nothing. Citations became auditable by construction, not by model compliance."*
 
+### prompt 引导、护栏保证（v13）
+> *"我的 grounding checker 不光抓到 LLM 的错，还抓到我自己 error-rate PromQL 的 bug——它返回的是每秒速率而不是比率。我也学会了别和非确定性较劲：memory 判定明明引用了 98.7% 的 heap，有时却给 0.4。我保留 prompt 作为主引导，但对必须保证的属性，加了一个 15 行、只会上调自相矛盾分数的确定性护栏，再用两个单测把它钉死；最终轮它真实触发了三次。质量靠软引导，保证靠硬护栏。"*
+
 ---
 
 ## 5. 已知限制与后续方向（Known limitations & next steps）
@@ -142,5 +179,5 @@
 |---|---|---|
 | Alertmanager 重复投递 webhook → 重复 Incident 记录 | 未修 | 幂等化：按 alert fingerprint 去重（dedup） |
 | `root_cause_hypothesis` 字段偶尔是断言式总结（引用在 `analysis_detail`） | 可接受 | 评估按完整输出判断（"measure what matters — check the full output, not one field"） |
-| memory 案无 ERROR 日志 → confidence 0.7（靠 metric） | 合理 | 无日志证据时正确降置信是校准正确，不是缺陷 |
-| RAG 是关键词检索（非语义） | 当前实现 | pgvector semantic search（见 README Roadmap） |
+| memory 案无 ERROR 日志 → metric-only 判定 | 合理（v13） | heap 超阈值即自足（0.7），并有确定性护栏兜底，置信度不再逐轮漂移 |
+| RAG 是关键词检索（非语义） | 当前实现 | pgvector semantic search 暂缓——只有 3 个 runbook 时上向量库是过度设计（over-engineering），知识库扩大后再做 |

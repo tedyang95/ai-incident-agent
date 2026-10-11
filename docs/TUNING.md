@@ -1,8 +1,8 @@
-# AI Incident Diagnosis Agent — Tuning Log (v1 → v9)
+# AI Incident Diagnosis Agent — Tuning Log (v1 → v13)
 
 > How this AI system was iteratively tuned toward accurate diagnosis: what changed each round, what was observed, and why it was changed.
 > Companion tooling: `docs/eval/run_baseline.sh` (evaluation), `docs/eval/check_grounding.py` (citation-veracity checker)
-> Data: `docs/eval/baseline_results_{v1..v9}.csv`, plus the PostgreSQL `incidents` table (every raw analysis is queryable by id)
+> Data: `docs/eval/baseline_results_{v1..v13}.csv`, plus the PostgreSQL `incidents` table (every raw analysis is queryable by id)
 > Chinese version: [docs/TUNING-zh.md](docs/TUNING-zh.md)
 
 ---
@@ -14,7 +14,7 @@
 | Concept | How this project applies it |
 |---|---|
 | **Ground truth** | Inject known faults (error / latency / memory) → the correct answer is *known* → auto-scoring. **Measure, not train.** |
-| **Eval set** | `docs/eval/eval-cases.json` (6 cases: 3 single + 3 composite, with per-alertname ground truth) |
+| **Eval set** | `docs/eval/eval-cases.json` — **12 scenarios / 19 scored alerts**: 4 single faults (error / latency / memory / downstream), 5 concurrent dual-faults (10 alerts), 2 time-overlapping *staggered* faults (4 alerts), and 1 healthy control. Each alert has per-alertname ground truth |
 | **Eval script** | `run_baseline.sh`: inject fault → load traffic → wait for AI analysis → pull Postgres → write CSV |
 | **Isolation (settle)** | Wait for alerts to clear + 30s before each case, so one case's "dirty data" never pollutes the next |
 | **Grounding check** | `check_grounding.py`: verifies verbatim that every `[metric:]` / `[log:]` citation exists in the retrieved context |
@@ -23,13 +23,17 @@
 
 ---
 
-## 1. The three fault scenarios (ground truth)
+## 1. The fault scenarios (ground truth)
 
 | Fault | Injection | Expected alert | Expected root-cause keywords |
 |---|---|---|---|
-| error | POST /api/orders returns 500 | HighErrorRate | RuntimeException, error rate |
+| error | POST /api/orders returns 500 | HighErrorRate | connection-pool exhaustion, SQLTransientConnectionException |
 | latency | all requests delayed 2-5s | HighLatency | p99 latency, delay |
 | memory | memory leak ~10MB/s | HighMemoryUsage | heap memory, jvm |
+| downstream | dependency (payment service) times out → 502 | HighErrorRate | downstream timeout, 502 (a *different* root cause than `error`) |
+| **healthy control** | synthetic alert, **no fault injected** | HealthyCheck | "no anomaly detected", confidence ≤ 0.5 (a correct *non*-incident) |
+
+Scenarios are also combined two ways: **concurrent** (two faults injected at once → two independent alerts) and **staggered** (fault A is stopped and fault B fired while A's logs are still inside the Loki window — a timing-isolation test).
 
 ---
 
@@ -101,20 +105,49 @@
 - **Tests**: +2 (citation resolution → resolved=true with backend query/url; fabricated index → resolved=false with nothing), 7/7 total
 - **Lesson**: *"trust the index, not the model's memory"* — evidence trustworthiness should be **guaranteed by architecture** (index→real-query mapping lives in the backend), not by **prompt compliance** (asking the model to be honest). Citing is *selection*; generating content is *creation* — let the model do the former and the backend do the latter
 
+### v10 — Scale the eval set: 12 scenarios, 19 scored alerts
+- **Context**: 9/9 on 3 faults looked saturated, but it only covered same-category single/composite faults. The set was expanded to **12 scenarios** adding: a **downstream** fault (dependency timeout → 502, a *different* root cause that still raises HighErrorRate), **staggered** faults (stop A, fire B while A's logs linger — a timing-isolation test), and a **healthy control** (a synthetic alert with nothing wrong).
+- **Result**: root-cause accuracy held on the original cases but the new scenarios immediately exposed calibration gaps (memory confidence, healthy verdict, stale-log attribution).
+- **Lesson**: **a passing 9/9 means the eval set is too small, not that the system is done**. New scenario *classes* (new fault mode, new timing, explicit negative case) are what reveal new failure modes.
+
+### v11 — Time-overlapping (staggered) discrimination
+- **Change**: strengthened discrimination for alerts whose correlation window still contains the *previous* fault's logs; tightened orchestration so each alert is scored against its own metric signature.
+- **Result**: a latency alert fired on top of residual error logs, and a fresh error fired on top of residual downstream logs, were both attributed correctly.
+- **Lesson**: the hardest competing signal is a **real but past** incident's evidence — retrieval isolation plus signature verification matter more than asking the model to "be careful".
+
+### v12 — Category-scoped retrieval + healthy calibration
+- **Change**: every tool call is scoped to the alert's own category (retrieval keywords, log filters, runbook match), and the prompt explicitly defines a healthy verdict as a low-confidence, non-incident outcome.
+- **Result**: **19/19 root causes correct**, including the healthy control correctly answering "no anomaly".
+- **Lesson**: **scope the evidence you feed the model per alert category**, and remember that a confidence score is about the *incident*, not the model's self-assurance.
+
+### v13 — Verbatim grounding, confidence semantics, and a deterministic guardrail
+This round started as "polish two blemishes" and the 100%-grounding audit forced four deeper, evidence-backed fixes (each isolated, re-measured in its own run — see `baseline_results_v13_round1..4.csv`):
+
+- **v13a — Log citation format (a shell, not a hallucination).** Error cases emitted zero checker-recognizable citations because the prompt never taught the exact `[log: "<verbatim>"]` double-quoted form; the model paraphrased in single quotes. The quotes were real but unresolvable. → taught the two machine-checkable forms and required verbatim copying.
+- **v13b — Memory confidence calibration rule was wrong.** The old rule demanded a fault-class log (an OutOfMemory line) that a leak does **not** emit before OOM. → confidence is scored against the alert's **primary signal**; a precisely-quoted heap value above threshold is self-sufficient.
+- **v13c — The grounding checker caught a bug in *my own monitoring query*.** Error-rate grounding hit 95%: the model summed two 5xx-rps series (0.077 + 0.091) and quoted a total the query never returned. Root cause: the tool's PromQL was `rate(5xx)` — **requests-per-second split across series**, not a proportion (it only *looked* like 70% on a single fault). → replaced with the exact alert expression `sum(rate(5xx)) / sum(rate(all))`, a single scalar, and forbade cross-series arithmetic in the prompt.
+- **v13d — Mandatory citation recall.** In a latency+memory composite the latency injection log *was retrieved* but not cited (evidence in hand, missing from the chain) — a **recall**, not precision, gap. → "if any line matches THIS alert's signature you MUST cite one", including inside composites.
+- **v13e — Confidence semantics + a deterministic guardrail.** A healthy run briefly scored 0.9 ("I am very sure it is healthy"), and memory verdicts drifted 0.4–0.7 run to run even while quoting heap ≈ 0.987. Two changes: (1) the prompt defines confidence as **probability that a real, actionable incident is happening now**, with a HEALTHY override (normal values → 0.3–0.5) and a rewritten rule distinguishing a *confirmed concurrent fault* (never lowers this alert's score) from an *unexplained conflicting signal* (cap 0.5); (2) a narrow backend **guardrail** `applyHeapConfidenceGuardrail` — if the model itself cites heap above the 0.85 alert threshold but returns < 0.7, the backend raises it to 0.7. It only reads a value the model cited, only ever raises, and is covered by two unit tests. In the final run it fired **3 times**, deterministically removing the residual drift.
+- **Final result**: **19/19 root causes** · **metric grounding 19/19** · **log grounding 14/14** (5 metric-only verdicts are by design: 4 pre-OOM memory + healthy) · confidence **healthy 0.5 / faults 0.7–0.9** · **9/9 unit tests**.
+- **Lesson**: *"Measure, then trust the architecture over the model's mood."* The prompt is a soft guide and should stay primary; for a property you need to **guarantee** (an internally-contradictory verdict), a small, explainable, tested deterministic guardrail beats rewording the prompt and hoping. Also: a grounding checker is not an LLM-only tool — it will happily fail your own PromQL.
+
 ---
 
 ## 3. Quantified summary
 
-| Metric | Start | Final |
+| Metric | Start | Final (v13) |
 |---|---|---|
-| Fault-diagnosis hit rate | 2/3 (v1) | **9/9 (v8→v9 held: single 3/3 + composite 3/3)** |
-| Citation grounding | 0% (v2, all fabricated) | **100% (v9 regression: metric 7/7 + log 7/7 verbatim)** |
-| Latency diagnosis confidence | 0.5 (no evidence) | **0.9** (alert-aware retrieval + composite discrimination) |
-| Error diagnosis confidence | 0.7 | **0.9** (after correlation window) |
-| Memory diagnosis confidence | 0.7 | **0.8** (single; correctly lowers to 0.4 without log evidence) |
-| Composite discrimination | first round 2/3 (HighLatency polluted) | **3/3** (reversed after retrieval isolation) |
+| Eval coverage | 3 single faults | **12 scenarios / 19 scored alerts** (single · concurrent · staggered · healthy control) |
+| Root-cause accuracy | 2/3 (v1) | **19/19** (every alert, including a correct healthy "no incident") |
+| Citation grounding | 0% (v2, all fabricated) | **metric 19/19 + log 14/14 (100%)**; 5 metric-only verdicts are by design, not misses |
+| Error-rate metric semantics | raw 5xx rps across series (mis-read as a %) | **single scalar `sum(5xx)/sum(all)`**, aligned with the alert rule |
+| Latency diagnosis confidence | 0.5 (no evidence) | **0.9** (alert-aware retrieval + composite/staggered discrimination) |
+| Memory diagnosis confidence | oscillated 0.4–0.8 (log rule wrong) | **stable 0.7** (heap primary-signal rule + deterministic guardrail) |
+| Healthy control | briefly over-confident 0.9 | **0.5** (confidence = incident probability, not self-assurance) |
+| Composite / staggered discrimination | first multi-alert round polluted | **correct per-alert attribution** even with a concurrent or residual fault |
 | Loki log pipeline | HTTP 400 (broken day one) | **HTTP 200, streams 0→1** |
 | Executable citations (v9) | citations were text, unreproducible | **LLM cites index → backend resolves real query + Grafana deep link** (invented index → resolved=false) |
+| Unit tests | – | **9/9**, including the guardrail firing / not-firing both ways |
 
 ---
 
@@ -135,6 +168,9 @@
 ### Trust by architecture (executable citations)
 > *"The last trust gap wasn't diagnosis accuracy — it was that my agent's citations were text, not actions. I made evidence executable: tools record every query they really ran, the prompt exposes an evidence index of real queries, and the model cites by number. The backend resolves each number to the actual query and a Grafana deep link; an invented index resolves to nothing. Citations became auditable by construction, not by model compliance."*
 
+### Prompt guides, the guardrail guarantees (v13)
+> *"My grounding checker didn't just catch LLM mistakes — it caught a bug in my own error-rate PromQL, which returned per-second rates instead of a ratio. And I learned to stop arguing with non-determinism: my memory verdict cited heap at 98.7% yet sometimes returned 0.4. I keep the prompt as the primary guide, but for a property I must guarantee I added a 15-line deterministic guardrail that only raises a self-contradictory score, and two unit tests that pin it. In the final run it fired three times. Soft guidance for quality, hard guardrails for guarantees."*
+
 ---
 
 ## 5. Known limitations & next steps
@@ -143,5 +179,5 @@
 |---|---|---|
 | Alertmanager may re-deliver a webhook → duplicate Incidents | open | idempotency: dedupe by alert fingerprint |
 | `root_cause_hypothesis` is occasionally a summary (citations live in `analysis_detail`) | acceptable | judge evaluation on the full output ("measure what matters — check the full output, not one field") |
-| Memory cases without ERROR logs → confidence 0.7 (metric only) | by design | correctly lowering confidence without log evidence is calibration, not a defect |
-| RAG is keyword-based (not semantic) | current | pgvector semantic search (see README Roadmap) |
+| Memory cases without ERROR logs → metric-only verdict | by design (v13) | heap above threshold is self-sufficient (0.7); a deterministic guardrail enforces it, so the confidence no longer drifts run to run |
+| RAG is keyword-based (not semantic) | current | pgvector semantic search deferred — with 3 runbooks a vector store is over-engineering; revisit when the KB grows |
